@@ -42,7 +42,7 @@ function parseArgs(argv) {
   const options = {
     port: 3000,
     host: '0.0.0.0',
-    config: path.join(__dirname, 'config', 'nodes.json'),
+    config: path.join(__dirname, 'config', 'core.json'),
     apps: path.join(__dirname, 'config', 'apps.json'),
     layout: path.join(__dirname, 'config', 'layout.json'),
   };
@@ -72,7 +72,7 @@ function parseArgs(argv) {
           'Usage: node core/server.js [--host ADDR] [--port N] [--config PATH]\n' +
             '  --host    interface to bind (default 0.0.0.0; use the AP address to harden)\n' +
             '  --port    default 3000\n' +
-            '  --config  node registry (default core/config/nodes.json)\n'
+            '  --config  secrets file (default core/config/core.json)\n'
         );
         process.exit(0);
         break;
@@ -90,13 +90,11 @@ const options = parseArgs(process.argv);
 // Boot
 // ---------------------------------------------------------------------------------
 
-let registryConfig;
 try {
-  registryConfig = auth.load(options.config);
+  auth.load(options.config);
   validate.loadApps(options.apps);
-  const layout = require(options.layout);
-  choreography.init(layout);
-  registry.init(registryConfig.nodes, layout);
+  choreography.init(require(options.layout));
+  registry.reset();
 } catch (err) {
   console.error(`\nJARVIS Core cannot start.\n\n${err.message}\n`);
   process.exit(1);
@@ -173,33 +171,35 @@ router.post('/api/agent/register', async (req, res, context) => {
   const body = await readBody(req);
   if (!body) return text(res, 400, 'REJECT malformed_body');
 
-  const nodeId = String(body.node || '').trim().toUpperCase();
-  const result = auth.authenticateNode(nodeId, body.token, context.address);
-  if (!result.ok) return text(res, 401, `REJECT ${result.reason}`);
+  const admitted = auth.authenticateJoin(body.secret, context.address);
+  if (!admitted.ok) return text(res, 401, `REJECT ${admitted.reason}`);
 
-  const sessionId = registry.openSession(nodeId, {
-    os: String(body.os || 'unknown').toLowerCase(),
-    hostname: body.host || null,
+  const hostname = validate.checkHostname(body.host);
+  if (!hostname.ok) return text(res, 400, `REJECT ${hostname.reason}`);
+
+  // The device tells Core what it is; Core decides what to call it. The number comes back
+  // in the reply, which is the first thing the agent prints, so a teammate can read their
+  // own device number off their screen and the presenter can ask for it by number.
+  const device = registry.enroll({
+    hostname: hostname.value,
+    os: validate.checkOs(body.os),
     agentVersion: body.agent || null,
+    wantsWall: body.wall === '1' || body.wall === 1 || body.wall === true,
     capabilities: String(body.caps || '')
       .split(',')
       .map((c) => c.trim())
       .filter(Boolean),
   });
 
-  if (!sessionId) return text(res, 500, 'REJECT registry_error');
-
-  // The agent needs both intervals so its timing follows Core rather than a local
-  // constant that could drift out of agreement across a release.
   return text(
     res,
     200,
-    `OK ${sessionId} ${registry.HEARTBEAT_MS} ${registry.HEARTBEAT_TIMEOUT_MS}`
+    `OK ${device.number} ${device.sessionId} ${registry.HEARTBEAT_MS} ${registry.HEARTBEAT_TIMEOUT_MS}`
   );
 });
 
 router.get('/api/agent/stream', (req, res, context) => {
-  const nodeId = String(context.query.get('node') || '').trim().toUpperCase();
+  const nodeId = Number(context.query.get('device'));
   const sessionId = context.query.get('session');
 
   if (!registry.sessionValid(nodeId, sessionId)) {
@@ -227,7 +227,7 @@ router.post('/api/agent/heartbeat', async (req, res) => {
   const body = await readBody(req);
   if (!body) return text(res, 400, 'REJECT malformed_body');
 
-  const nodeId = String(body.node || '').trim().toUpperCase();
+  const nodeId = Number(body.device);
   if (!registry.sessionValid(nodeId, body.session)) return text(res, 401, 'REJECT bad_session');
 
   registry.heartbeat(nodeId, {
@@ -245,7 +245,7 @@ router.post('/api/agent/ack', async (req, res) => {
   const body = await readBody(req);
   if (!body) return text(res, 400, 'REJECT malformed_body');
 
-  const nodeId = String(body.node || '').trim().toUpperCase();
+  const nodeId = Number(body.device);
   if (!registry.sessionValid(nodeId, body.session)) return text(res, 401, 'REJECT bad_session');
 
   commands.acknowledge(nodeId, body.cid, body.status || 'success', body.msg || null);
@@ -255,7 +255,7 @@ router.post('/api/agent/ack', async (req, res) => {
 // --- Overlay channel ---------------------------------------------------------------
 
 router.get('/api/overlay/stream', (req, res, context) => {
-  const nodeId = String(context.query.get('node') || '').trim().toUpperCase();
+  const nodeId = Number(context.query.get('device'));
   const ticket = context.query.get('ticket');
 
   const redeemed = auth.redeemTicket(ticket, 'overlay', nodeId);
@@ -269,9 +269,10 @@ router.get('/api/overlay/stream', (req, res, context) => {
 
   const node = registry.get(nodeId);
   connection.sendJson('hello', {
-    node: nodeId,
-    label: node ? node.label : nodeId,
-    role: node ? node.role : 'node',
+    device: nodeId,
+    label: node ? node.hostname : String(nodeId),
+    os: node ? node.os : 'unknown',
+    isWall: registry.isWall(nodeId),
     scene: node ? node.scene : 'normal',
     order: registry.ids(),
 
@@ -285,7 +286,7 @@ router.get('/api/overlay/stream', (req, res, context) => {
   // The wall is a node whose overlay shows the room rather than a scene (DEVIATIONS.md
   // D5), so it needs the state feed the observers get. Subscribing here rather than
   // giving MAIN an observer ticket keeps the overlay's authority scoped to one screen.
-  if (node && node.role === 'wall') {
+  if (registry.isWall(nodeId)) {
     wallOverlays.add(connection);
     connection.sendJson('state', registry.snapshot());
 
@@ -325,9 +326,48 @@ router.post('/api/auth/ticket', (req, res, context) => {
 
 // --- Control API (§26) --------------------------------------------------------------
 
+router.get('/api/devices', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  json(res, 200, { ok: true, ...registry.snapshot(), apps: validate.appNames() });
+});
+
+/** Kept so an old controller or MCP build keeps working after an upgrade mid-rehearsal. */
 router.get('/api/nodes', (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
   json(res, 200, { ok: true, ...registry.snapshot(), apps: validate.appNames() });
+});
+
+/** Mute or unmute speech, per device or across the room. */
+router.post('/api/mute', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+  json(res, 200, commands.setMuted(body.target || 'ALL', Boolean(body.muted)));
+});
+
+/** Designate which device shows the Command Wall. */
+router.post('/api/wall', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const resolved = registry.resolve(body.device);
+  if (!resolved.ok || resolved.all) return json(res, 400, { ok: false, error: 'device_unknown' });
+
+  registry.claimWall(resolved.number);
+  json(res, 200, { ok: true, wall: resolved.number });
+});
+
+/** Forget a device entirely — the operator's way to remove one that should not be here. */
+router.post('/api/forget', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const resolved = registry.resolve(body.device);
+  if (!resolved.ok || resolved.all) return json(res, 400, { ok: false, error: 'device_unknown' });
+
+  json(res, 200, { ok: registry.forget(resolved.number), device: resolved.number });
 });
 
 router.post('/api/command', async (req, res, context) => {
@@ -469,7 +509,14 @@ function serveAgent(res, filename) {
     'Content-Type': 'text/plain; charset=utf-8',
     'Cache-Control': 'no-store',
   });
-  res.end(source.split('@@CORE_URL@@').join(origin));
+  // Both substitutions are what reduce the teammate's job to pasting one line: the script
+  // arrives already knowing where Core is and how to authenticate. Anyone who can fetch
+  // this can enroll, which is exactly the model — see DEVIATIONS.md D8.
+  res.end(
+    source
+      .split('@@CORE_URL@@').join(origin)
+      .split('@@JOIN_SECRET@@').join(auth.joinSecret())
+  );
 }
 
 router.get('/join', (req, res) => serveAgent(res, 'jarvis-agent.sh'));
@@ -510,22 +557,25 @@ server.headersTimeout = 0;
 server.requestTimeout = 0;
 
 server.listen(options.port, options.host, () => {
-  const nodeIds = registry.ids();
+  const network = auth.wifi();
 
   console.log('');
   console.log('    J.A.R.V.I.S.  CORE');
   console.log('');
   console.log(`    listening   ${options.host}:${options.port}`);
   console.log(`    origin      ${origin}`);
-  console.log(`    nodes       ${nodeIds.join('  ')}`);
+  console.log(`    network     ${network.ssid}`);
   console.log(`    apps        ${validate.appNames().join('  ')}`);
   console.log('');
   console.log(`    wall        ${origin}/wall/`);
   console.log(`    control     ${origin}/control/`);
   console.log('');
-  console.log('    teammates run:');
-  console.log(`      macOS    curl -s ${origin}/join | bash -s <NODE> <TOKEN>`);
+  console.log('    every teammate runs the same line — no name, no token:');
+  console.log('');
+  console.log(`      macOS    curl -s ${origin}/join | bash`);
   console.log(`      Windows  iwr ${origin}/join.ps1 -UseBasicParsing | iex`);
+  console.log('');
+  console.log('    devices are numbered 1, 2, 3 ... in the order they join.');
   console.log('');
 
   if (options.host === '0.0.0.0') {
