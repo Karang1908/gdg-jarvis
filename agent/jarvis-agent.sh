@@ -96,7 +96,21 @@ SESSION_ID=""
 HEARTBEAT_MS=5000
 CAFFEINATE_PID=""
 HEARTBEAT_PID=""
+STREAM_PID=""
 RUNNING=1
+
+# The command stream is read through a FIFO rather than a `curl | while read` pipeline.
+#
+# That is not a style choice. bash defers a trap until the current foreground command
+# finishes, and an SSE stream never finishes — so with a pipeline, SIGTERM would sit
+# unhandled and the overlay would outlive the agent. Reading from a FIFO makes the
+# foreground command the `read` builtin, which a trapped signal *does* interrupt, so
+# cleanup runs immediately.
+#
+# Interactive Ctrl+C happens to work either way, because the terminal signals the whole
+# process group and curl dies with it. Anything else — a service manager, a wrapper
+# script, scripts/start-mac.sh — signals only the agent, and would hang.
+STREAM_FIFO="$STATE_DIR/stream" 
 
 timestamp() { date '+%H:%M:%S'; }
 say_log()   { printf '%s  %s\n' "$(timestamp)" "$*" >&2; }
@@ -533,6 +547,7 @@ cleanup() {
   rm -f "$STATE_DIR/session" "$STATE_DIR/held"
   stop_overlay
 
+  [ -n "$STREAM_PID" ] && kill "$STREAM_PID" 2>/dev/null
   [ -n "$HEARTBEAT_PID" ] && kill "$HEARTBEAT_PID" 2>/dev/null
   [ -n "$CAFFEINATE_PID" ] && kill "$CAFFEINATE_PID" 2>/dev/null
 
@@ -571,14 +586,23 @@ while [ "$RUNNING" = "1" ]; do
     # The command channel. curl reconnects nothing on its own; when the stream ends we
     # fall out of this loop, re-register, and come back — which is what makes a Wi-Fi blip
     # a two-second gap rather than a dead node.
-    curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION_ID" 2>/dev/null |
-      while IFS= read -r line; do
-        case "$line" in
-          'data: '*) handle_command "${line#data: }" ;;
-          ':'*|'retry:'*|'') ;;
-        esac
-      done
+    rm -f "$STREAM_FIFO"
+    mkfifo "$STREAM_FIFO" 2>/dev/null
 
+    curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION_ID" \
+      > "$STREAM_FIFO" 2>/dev/null &
+    STREAM_PID=$!
+
+    while IFS= read -r line; do
+      case "$line" in
+        'data: '*) handle_command "${line#data: }" ;;
+        ':'*|'retry:'*|'') ;;
+      esac
+    done < "$STREAM_FIFO"
+
+    kill "$STREAM_PID" 2>/dev/null
+    STREAM_PID=""
+    rm -f "$STREAM_FIFO"
     rm -f "$STATE_DIR/session"
     [ -n "$HEARTBEAT_PID" ] && kill "$HEARTBEAT_PID" 2>/dev/null
     [ "$RUNNING" = "1" ] && say_log "connection to Core lost; reconnecting"
