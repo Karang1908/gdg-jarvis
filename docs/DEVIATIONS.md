@@ -259,6 +259,77 @@ needs the presenter's tethered internet. Everything else on the controller works
 
 ---
 
+## D11 — The brain runs on Core, not on the presenter's machine
+
+**Spec:** §29 puts the MCP server, the LLM client, and the voice on the Presenter Mac, and
+makes that machine dual-homed — JARVIS-NET over Wi-Fi with no internet, the internet over a
+tethered iPhone. §31 has each device speak for itself.
+
+**Problem:** it puts the hardest network arrangement on the machine that is also driving the
+projector, and it scatters JARVIS across the room.
+
+- The Mac has to hold two routes correctly, in the right order, while presenting. Get the
+  service order wrong and either the LLM loses the internet or the room becomes
+  unreachable, and both look like the demo simply breaking.
+- Speech belonging to whichever device was addressed means JARVIS has no voice at all until
+  a device enrols, and the voice moves around the room depending on what was last targeted.
+- The thinking happens in one place and the room lives in another, with a Wi-Fi hop between
+  every tool call and its effect.
+
+**Change:** Core, the MCP server, the AI client, and the voice all run on the Kali machine.
+
+```
+   KALI                                        JARVIS-NET
+   ├── ethernet / tethered phone → internet    │
+   ├── agy CLI ─┐                              ├── device 1  (macOS)
+   ├── MCP ─────┤ localhost                    ├── device 2  (Windows)
+   ├── Core ────┘                              └── device 3  (macOS)
+   └── speakers → JARVIS's voice
+```
+
+Kali is now the dual-homed machine, which is the right place for it: Wi-Fi is already
+committed to being the access point, so the second route is ethernet or a tethered phone,
+and nobody is holding it while talking to an audience. The presenter's Mac becomes an
+ordinary device that happens to drive the projector.
+
+MCP reaches Core over localhost, so there is no network hop between the model and the room.
+
+**JARVIS gets one voice.** Speech comes from the machine running Core, because one presence
+has one voice — and because it then works before a single device has enrolled, which matters
+for the moment the room hears "Yes, sir" before anything has been taken over. Per-device
+speech still exists and is still right for the deliberate effect of every laptop saying the
+same thing at once; it is simply no longer the default.
+
+**The trade:** if Kali has no internet, the LLM layer is gone. That is survivable by
+construction — §39 already requires the demo to run from the controller with no LLM at all,
+and the controller's own voice control matches phrases locally with no model in the path. A
+tethered phone on Kali's USB is the fallback, exactly as the spec proposed for the Mac.
+
+---
+
+## D12 — The personality is a file
+
+**Spec:** §30 gives the LLM its system instructions as a block of text inside the spec.
+
+**Problem:** a system prompt written into a document is a system prompt nobody tunes. The
+voice of the thing is the part most worth iterating on between rehearsals, and it should not
+require editing code or hunting through a spec to change.
+
+**Change:** `core/config/personality.md` — plain markdown with optional YAML frontmatter,
+edited like any other file. Core loads it and serves it at `/api/personality`; the MCP
+server takes it as its `instructions`, which is what an MCP client surfaces to the model;
+and `scripts/install-mcp.sh` copies it to Antigravity's custom-agent location.
+
+One source, three consumers, no copy that can quietly disagree with another.
+`POST /api/personality/reload` re-reads it without restarting Core, so it can be adjusted
+between run-throughs.
+
+The MCP server falls back progressively — Core, then the file on disk, then a terse
+built-in — because a personality that silently failed to load would leave JARVIS sounding
+like a generic assistant with nothing to indicate why.
+
+---
+
 ## Not changed
 
 For the avoidance of doubt, these remain exactly as specified:
@@ -270,5 +341,6 @@ For the avoidance of doubt, these remain exactly as specified:
   `execute_code`. The LLM never reaches a shell.
 - The application allowlist in §13 — logical names only, never paths or shell strings.
 - The MCP boundary in §25 — MCP talks to Core over HTTP and contains no OS-specific logic.
+  D11 moves which machine it runs on, not what it is allowed to do.
 - The reliability rule in §39 — the first takeover is manually triggered from `/control`.
   Voice and the LLM are layered on afterwards and are never load-bearing.
