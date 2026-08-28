@@ -1,0 +1,234 @@
+/*
+ * Command Wall.
+ *
+ * Shared by the standalone /wall/ page and MAIN's overlay in wall mode, so this file
+ * assumes nothing about which container it sits in.
+ *
+ * The layout is a single column with the node graph taking the largest share, because on
+ * a projector the useful question is "how many machines, and are they all with me" — and
+ * that has to be answerable from the back row without reading anything.
+ */
+
+.wall-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 3vh;
+  position: relative;
+  z-index: 20;
+}
+
+/* -------------------------------------------------------------------------------------
+ * Header
+ * ---------------------------------------------------------------------------------- */
+
+.wall-header {
+  text-align: center;
+}
+
+.wall-title {
+  margin: 0;
+  font-size: clamp(26px, 4.4vw, 82px);
+  font-weight: 400;
+  color: var(--cyan-bright);
+  text-shadow: var(--glow-cyan);
+}
+
+.wall-subtitle {
+  margin-top: 0.8vh;
+  font-size: clamp(10px, 1.1vw, 18px);
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--cyan-dim);
+}
+
+/* -------------------------------------------------------------------------------------
+ * Node graph
+ *
+ * auto-fit rather than a fixed column count: the same wall has to look composed with
+ * three nodes and with six, and a hard-coded grid would leave a hole either way.
+ * ---------------------------------------------------------------------------------- */
+
+.wall-graph {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 40vw), 1fr));
+  gap: 1.6vw;
+  align-content: center;
+}
+
+.node-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1vh;
+  padding: 3vh 1.2vw;
+  border: 1px solid var(--cyan-ghost);
+  background: var(--panel);
+  transition: border-color 240ms ease, background 240ms ease, opacity 240ms ease;
+}
+
+/* The node showing this very wall. A quiet marker; it should not compete with the room. */
+.node-card.is-self {
+  border-color: var(--cyan-dim);
+}
+
+.node-card.is-offline {
+  opacity: 0.34;
+  border-style: dashed;
+}
+
+.node-card.is-dark {
+  border-color: var(--amber-dim);
+}
+
+/* Identify. This is the assertion the audience is invited to check, so on the wall it is
+   as loud as it is on the node itself. */
+.node-card.is-identifying {
+  animation: card-identify 620ms steps(1, end) infinite;
+  border-color: var(--cyan);
+}
+
+@keyframes card-identify {
+  0%,
+  49% {
+    background: var(--panel);
+  }
+  50%,
+  100% {
+    background: rgba(79, 216, 255, 0.55);
+  }
+}
+
+.node-dot-wrap {
+  font-size: clamp(20px, 2.4vw, 40px);
+  line-height: 1;
+}
+
+.node-name {
+  font-size: clamp(20px, 2.9vw, 56px);
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: var(--cyan-bright);
+}
+
+.node-label {
+  font-size: clamp(10px, 0.95vw, 15px);
+  letter-spacing: 0.2em;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+.node-meta {
+  display: flex;
+  gap: 1.2ch;
+  font-size: clamp(10px, 0.9vw, 14px);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  min-height: 1.2em;
+}
+
+.node-scene {
+  font-size: clamp(10px, 1vw, 16px);
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+  min-height: 1.2em;
+}
+
+/* -------------------------------------------------------------------------------------
+ * Summary
+ * ---------------------------------------------------------------------------------- */
+
+.wall-summary {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 3vw;
+}
+
+.wall-count {
+  font-size: clamp(14px, 1.9vw, 34px);
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+}
+
+/* Not every node is with us. Amber rather than red: it is a state the operator should
+   notice, not an error — a laptop can legitimately be missing from a rehearsal. */
+.wall-count.partial {
+  color: var(--amber);
+}
+
+.wall-network {
+  font-size: clamp(10px, 1.1vw, 18px);
+  letter-spacing: 0.4em;
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------------------------------
+ * Activity
+ *
+ * Texture, not a record. Small, dim, and capped, so it reads as a system that is alive
+ * without inviting anyone to actually read it during the talk.
+ * ---------------------------------------------------------------------------------- */
+
+.wall-activity {
+  max-height: 26vh;
+  overflow: hidden;
+}
+
+.wall-activity-list {
+  margin-top: 1vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35vh;
+  font-size: clamp(9px, 0.85vw, 13px);
+  letter-spacing: 0.08em;
+}
+
+.act-line {
+  display: flex;
+  gap: 1.4ch;
+  align-items: baseline;
+  animation: sweep-in 260ms ease-out both;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.act-time {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+.act-msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.act-target {
+  color: var(--cyan-dim);
+  flex: none;
+}
+
+.act-info {
+  color: var(--ink-dim);
+}
+
+.act-good {
+  color: var(--good);
+}
+
+.act-warn {
+  color: var(--amber);
+}
+
+.act-error {
+  color: var(--alert);
+}
+
+/* A refused action. Given its own colour because during a demo it is the line that most
+   often explains why a screen did not move. */
+.act-deny {
+  color: #c98cff;
+}
