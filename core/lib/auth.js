@@ -3,14 +3,20 @@
 /**
  * Trust boundary.
  *
- * SPEC.md §1 is the whole point of this file: joining the Wi-Fi grants nothing. Control
- * requires a per-node token issued out of band. Three trust levels exist (§27) — device
- * agents, the controller, and the MCP server — and the last two share the admin token.
+ * Three secrets, three jobs:
  *
- * Browsers complicate this, because EventSource cannot set an Authorization header. The
- * naive fix is a token in the query string, which then lives in browser history and in
- * every access log on the path. Instead Core mints short-lived, single-use, scoped
- * tickets; see DEVIATIONS.md D7.
+ *   join secret   any device that presents it may enroll. Handed out inside the join
+ *                 script, so a teammate types nothing at all.
+ *   admin token   controls the room. The controller and the MCP server hold it.
+ *   session token issued per device at enrollment, valid until it disconnects.
+ *
+ * SPEC.md §8 assumed a fixed roster with a pre-shared token per node. That is abandoned
+ * deliberately — the room has to accept any number of devices, arriving in any order, with
+ * nobody editing a config file (see DEVIATIONS.md D8). What survives is the part that
+ * matters: joining the Wi-Fi still grants nothing on its own, and controlling *other*
+ * people's machines still needs the admin token, which is never handed out.
+ *
+ * The worst a leaked join secret buys is the ability to put JARVIS on your own screen.
  */
 
 const crypto = require('crypto');
@@ -24,17 +30,16 @@ const TICKET_SWEEP_MS = 30_000;
 
 let config = null;
 
-/** Live tickets, keyed by ticket string. */
 const tickets = new Map();
 
 /**
- * Constant-time token comparison.
+ * Constant-time comparison.
  *
  * timingSafeEqual throws on a length mismatch, which would itself leak length. Hashing
  * both sides first gives fixed-width inputs, so the comparison is uniform regardless of
  * what was submitted.
  */
-function tokensMatch(submitted, expected) {
+function secretsMatch(submitted, expected) {
   if (typeof submitted !== 'string' || typeof expected !== 'string') return false;
   const a = crypto.createHash('sha256').update(submitted).digest();
   const b = crypto.createHash('sha256').update(expected).digest();
@@ -42,20 +47,18 @@ function tokensMatch(submitted, expected) {
 }
 
 /**
- * Load nodes.json, refusing to start on anything that would silently weaken the demo.
+ * Load configuration, refusing to start on anything that would silently weaken the demo.
  *
- * Failing loudly here is deliberate. A Core that boots with placeholder tokens is worse
- * than one that refuses to boot, because the failure would surface in front of an
- * audience instead of at setup time.
+ * Failing loudly here is deliberate. A Core that boots with placeholder secrets fails in
+ * front of an audience instead of at setup time.
  */
 function load(configPath) {
   const resolved = path.resolve(configPath);
 
   if (!fs.existsSync(resolved)) {
     throw new Error(
-      `No node registry at ${resolved}\n` +
-        `  Copy core/config/nodes.example.json to core/config/nodes.json and set real tokens.\n` +
-        `  scripts/setup-kali.sh can generate them for you.`
+      `No configuration at ${resolved}\n` +
+        `  Run scripts/setup-kali.sh --secrets-only to generate one.`
     );
   }
 
@@ -63,82 +66,63 @@ function load(configPath) {
   try {
     parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
   } catch (err) {
-    throw new Error(`Node registry at ${resolved} is not valid JSON: ${err.message}`);
+    throw new Error(`Configuration at ${resolved} is not valid JSON: ${err.message}`);
   }
 
-  if (!parsed.admin || typeof parsed.admin.token !== 'string') {
-    throw new Error(`Node registry at ${resolved} has no admin.token`);
-  }
-  if (!parsed.nodes || Object.keys(parsed.nodes).length === 0) {
-    throw new Error(`Node registry at ${resolved} defines no nodes`);
-  }
-
-  const placeholders = [];
-  if (parsed.admin.token.startsWith('CHANGE-ME')) placeholders.push('admin');
-  for (const [id, node] of Object.entries(parsed.nodes)) {
-    if (typeof node.token !== 'string' || node.token.length === 0) {
-      throw new Error(`Node ${id} has no token`);
-    }
-    if (node.token.startsWith('CHANGE-ME')) placeholders.push(id);
-  }
-  if (placeholders.length) {
-    throw new Error(
-      `Placeholder tokens still present for: ${placeholders.join(', ')}\n` +
-        `  Run scripts/setup-kali.sh to generate a registry with real tokens.`
-    );
+  const problems = [];
+  if (!parsed.admin || typeof parsed.admin.token !== 'string' || !parsed.admin.token) {
+    problems.push('admin.token is missing');
+  } else if (parsed.admin.token.startsWith('CHANGE-ME')) {
+    problems.push('admin.token is still a placeholder');
   }
 
-  // Two nodes sharing a token would make the activity log a work of fiction: commands
-  // would be attributable to either machine. Catch it at load rather than at 2am.
-  const seen = new Map();
-  for (const [id, node] of Object.entries(parsed.nodes)) {
-    if (seen.has(node.token)) {
-      throw new Error(`Nodes ${seen.get(node.token)} and ${id} share a token`);
-    }
-    seen.set(node.token, id);
+  if (!parsed.join || typeof parsed.join.secret !== 'string' || !parsed.join.secret) {
+    problems.push('join.secret is missing');
+  } else if (parsed.join.secret.startsWith('CHANGE-ME')) {
+    problems.push('join.secret is still a placeholder');
+  }
+
+  // The one that would be quietly catastrophic: if these were ever equal, the secret
+  // printed into every teammate's join script would also be the key to the whole room.
+  if (parsed.admin && parsed.join && parsed.admin.token === parsed.join.secret) {
+    problems.push('admin.token and join.secret must not be the same value');
+  }
+
+  if (problems.length) {
+    throw new Error(`Configuration at ${resolved}:\n  - ${problems.join('\n  - ')}`);
   }
 
   config = parsed;
-  return {
-    nodeIds: Object.keys(parsed.nodes),
-    nodes: parsed.nodes,
-  };
+  return config;
 }
 
-function nodeConfig(nodeId) {
-  if (!config) return null;
-  return config.nodes[nodeId] || null;
+function adminToken() {
+  return config ? config.admin.token : null;
 }
 
-function nodeIds() {
-  return config ? Object.keys(config.nodes) : [];
+function joinSecret() {
+  return config ? config.join.secret : null;
+}
+
+function wifi() {
+  return (config && config.wifi) || { ssid: 'JARVIS-NET', passphrase: null };
 }
 
 /**
- * Authenticate an agent. Returns a reason string on failure, per PROTOCOL.md §3.
+ * Authenticate a device that wants to enroll.
  *
- * An unknown node and a bad token are reported distinctly because the operator needs to
- * tell a typo'd node name from a stale token while setting up four laptops. Both are
- * logged with the source address, and neither reveals anything an attacker on the
- * network could not already learn by trying.
+ * Every rejection is logged with the source address. There is no per-device token to get
+ * wrong any more, so a refusal here means either the wrong secret or a stale copy of the
+ * join script from a previous run.
  */
-function authenticateNode(nodeId, token, remoteAddress) {
-  const node = nodeConfig(nodeId);
+function authenticateJoin(secret, remoteAddress) {
+  if (!config) return { ok: false, reason: 'not_configured' };
 
-  if (!node) {
-    log.deny('register refused', { node: nodeId, reason: 'unknown_node', from: remoteAddress });
-    return { ok: false, reason: 'unknown_node' };
+  if (!secretsMatch(secret, config.join.secret)) {
+    log.deny('join refused', { reason: 'bad_secret', from: remoteAddress });
+    return { ok: false, reason: 'bad_secret' };
   }
-  if (node.disabled) {
-    log.deny('register refused', { node: nodeId, reason: 'node_disabled', from: remoteAddress });
-    return { ok: false, reason: 'node_disabled' };
-  }
-  if (!tokensMatch(token, node.token)) {
-    log.deny('register refused', { node: nodeId, reason: 'bad_token', from: remoteAddress });
-    return { ok: false, reason: 'bad_token' };
-  }
-
-  return { ok: true, node };
+  return { ok: true };
 }
 
 /** Authenticate a controller or the MCP server from an Authorization header. */
@@ -149,34 +133,30 @@ function authenticateAdmin(headerValue) {
   const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   if (!match) return false;
 
-  return tokensMatch(match[1], config.admin.token);
+  return secretsMatch(match[1], config.admin.token);
 }
 
 /**
  * Mint a scoped, single-use ticket.
  *
- * `scope` is 'observer' (read-only state and activity) or 'overlay' (one node's scene
- * stream). An overlay ticket names its node, so a teammate who copies the URL out of
- * their own browser gains access to nothing but their own screen.
+ * Browsers cannot set an Authorization header on an EventSource, and putting the admin
+ * token in a query string would write it into history and into every access log on the
+ * path. `scope` is 'observer' (read-only room state) or 'overlay' (one device's scenes).
  */
-function issueTicket(scope, nodeId = null) {
+function issueTicket(scope, deviceId = null) {
   const ticket = crypto.randomBytes(16).toString('hex');
-  tickets.set(ticket, {
-    scope,
-    nodeId,
-    expiresAt: Date.now() + TICKET_TTL_MS,
-  });
+  tickets.set(ticket, { scope, deviceId, expiresAt: Date.now() + TICKET_TTL_MS });
   return { ticket, expiresIn: TICKET_TTL_MS / 1000 };
 }
 
 /**
- * Redeem a ticket.
+ * Redeem a ticket. Single use: redeeming removes it.
  *
- * Single-use: redeeming removes it. A dropped SSE connection therefore needs a fresh
- * ticket, which the browser clients handle by re-authenticating. That is the right
- * trade — a ticket replayable for its full minute is a ticket worth stealing.
+ * A dropped stream therefore needs a fresh ticket, which the browser clients handle by
+ * re-authenticating or by using the replacement handed to them on connect. That is the
+ * right trade — a ticket replayable for a full minute is a ticket worth stealing.
  */
-function redeemTicket(ticket, requiredScope, requiredNode = null) {
+function redeemTicket(ticket, requiredScope, requiredDevice = null) {
   const record = tickets.get(ticket);
   if (!record) return { ok: false, reason: 'unknown_ticket' };
 
@@ -184,9 +164,11 @@ function redeemTicket(ticket, requiredScope, requiredNode = null) {
 
   if (record.expiresAt < Date.now()) return { ok: false, reason: 'expired_ticket' };
   if (record.scope !== requiredScope) return { ok: false, reason: 'wrong_scope' };
-  if (requiredNode && record.nodeId !== requiredNode) return { ok: false, reason: 'wrong_node' };
+  if (requiredDevice !== null && String(record.deviceId) !== String(requiredDevice)) {
+    return { ok: false, reason: 'wrong_device' };
+  }
 
-  return { ok: true, scope: record.scope, nodeId: record.nodeId };
+  return { ok: true, scope: record.scope, deviceId: record.deviceId };
 }
 
 /** Expired tickets are already useless; this just stops the map growing all evening. */
@@ -200,9 +182,10 @@ sweeper.unref();
 
 module.exports = {
   load,
-  nodeConfig,
-  nodeIds,
-  authenticateNode,
+  adminToken,
+  joinSecret,
+  wifi,
+  authenticateJoin,
   authenticateAdmin,
   issueTicket,
   redeemTicket,
