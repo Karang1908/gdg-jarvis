@@ -97,13 +97,17 @@ window with no way back that they will find under stage lighting.
 
 **Change:** three independent recovery paths, in order of preference.
 
-1. The agent traps `EXIT`, `INT`, `TERM` and tears the overlay down on any exit path.
-2. The overlay page runs a dead-man switch: if Core becomes unreachable for longer than
-   the configured grace period, it closes itself.
-3. The overlay accepts a local escape gesture (`Esc` three times) regardless of
-   connection state.
+1. The agent traps `EXIT`, `INT`, `TERM` and `HUP` and tears the overlay down on any exit
+   path.
+2. The overlay page runs a dead-man switch: if Core goes silent for 45 seconds — three
+   missed keep-alives — it closes itself.
+3. The overlay accepts a local escape gesture regardless of connection state: **hold
+   Escape** for just over a second.
 
-Path 3 is the one a panicking teammate can use. It is documented on the overlay itself.
+Path 3 is the one a panicking teammate can use, so it is a hold rather than a tap. A tap
+can be struck by accident and would drop a screen mid-demo; a hold cannot, and it can show
+a progress bar, which matters because anyone performing this gesture is already worried
+and deserves to see that it is working.
 
 ---
 
