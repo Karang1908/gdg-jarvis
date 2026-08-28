@@ -28,6 +28,10 @@ const ALLOWED_SCHEMES = new Set(['http:', 'https:']);
 
 const MAX_URL_LENGTH = 2048;
 const MAX_SPEECH_LENGTH = 240;
+const MAX_HOSTNAME_LENGTH = 48;
+
+/** Operating systems with an application-allowlist column in apps.json. */
+const KNOWN_OS = new Set(['macos', 'windows', 'linux']);
 
 /** C0 controls plus DEL. Stripped from anything headed for a speech synthesiser. */
 const CONTROL_CHARS = new RegExp('[\\x00-\\x1F\\x7F]', 'g');
@@ -146,20 +150,33 @@ function checkVolume(raw) {
 }
 
 /**
- * Validate a node ID.
+ * Validate a hostname reported at enrollment.
  *
- * Restricting the character set means a node ID can never introduce a separator into a
- * command line, a path segment into a URL, or a wildcard into a lookup.
+ * This string is displayed on the wall, on the controller, and read aloud, so it is
+ * sanitised rather than rejected — a machine called "Ravi's MacBook (work)" is perfectly
+ * ordinary and refusing it would strand a real laptop. Control characters go, length is
+ * capped so one absurd hostname cannot break the wall's layout, and the result is only
+ * ever inserted with textContent, never as markup.
  */
-function checkNodeId(raw, knownIds) {
-  if (typeof raw !== 'string') return { ok: false, reason: 'node_missing' };
+function checkHostname(raw) {
+  if (typeof raw !== 'string') return { ok: false, reason: 'hostname_missing' };
 
-  const id = raw.trim().toUpperCase();
-  if (!/^[A-Z0-9_-]{1,32}$/.test(id)) return { ok: false, reason: 'node_id_malformed' };
-  if (id === 'ALL') return { ok: true, value: 'ALL', isBroadcast: true };
-  if (knownIds && !knownIds.includes(id)) return { ok: false, reason: 'node_unknown' };
+  const cleaned = raw.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned === '') return { ok: false, reason: 'hostname_empty' };
 
-  return { ok: true, value: id, isBroadcast: false };
+  return { ok: true, value: cleaned.slice(0, MAX_HOSTNAME_LENGTH) };
+}
+
+/**
+ * Validate an operating system name against the ones we have backends for.
+ *
+ * Unknown values become 'unknown' rather than being refused: an OS we do not recognise
+ * only means the device gets no application mappings, which its own capability list
+ * already reflects.
+ */
+function checkOs(raw) {
+  const os = String(raw || '').trim().toLowerCase();
+  return KNOWN_OS.has(os) ? os : 'unknown';
 }
 
 /** Scene names the overlay actually implements (§20), plus the three it adds. */
@@ -193,9 +210,12 @@ module.exports = {
   checkApp,
   checkSpeech,
   checkVolume,
-  checkNodeId,
+  checkHostname,
+  checkOs,
   checkScene,
   SCENES,
   ALLOWED_SCHEMES,
   MAX_SPEECH_LENGTH,
+  MAX_HOSTNAME_LENGTH,
+  KNOWN_OS,
 };
