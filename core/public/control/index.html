@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000308" />
+    <title>JARVIS — Control</title>
+
+    <!--
+      SPEC.md §19 and §39. This page is the guaranteed path: it works with no LLM, no
+      voice recognition, and no internet, and the first cinematic moment of the demo is
+      triggered from here rather than from anything that could fail to understand a
+      sentence.
+
+      Built for a phone held in one hand, in a dark room, by someone who is also talking.
+    -->
+    <link rel="stylesheet" href="/shared/jarvis.css" />
+    <link rel="stylesheet" href="/control/control.css" />
+  </head>
+
+  <body class="control-body">
+    <div class="atmosphere"></div>
+
+    <!-- Sign-in -->
+    <div class="gate" id="gate">
+      <form class="gate-form panel" id="gate-form">
+        <div class="label">JARVIS CORE</div>
+        <div class="gate-title wordmark">J.A.R.V.I.S.</div>
+        <label class="gate-label" for="gate-token">ADMIN TOKEN</label>
+        <input
+          class="gate-input"
+          id="gate-token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          inputmode="text"
+        />
+        <button class="gate-button" type="submit">AUTHENTICATE</button>
+        <div class="gate-error" id="gate-error" hidden></div>
+      </form>
+    </div>
+
+    <main class="console" id="console" hidden>
+      <header class="console-head">
+        <span class="label">J.A.R.V.I.S. CONTROL</span>
+        <span class="console-link">
+          <span class="dot" id="link-dot"></span>
+          <span class="label" id="link-text">CONNECTING</span>
+        </span>
+      </header>
+
+      <!-- Live room state. Doubles as the target selector: tapping a node selects it. -->
+      <section class="nodes" id="nodes"></section>
+
+      <!-- Which node the next action applies to. -->
+      <section class="target-row">
+        <span class="label">TARGET</span>
+        <strong class="target-value" id="target-value">ALL</strong>
+      </section>
+
+      <section class="actions">
+        <button class="btn btn-primary" data-act="takeover">TAKE THE ROOM</button>
+        <button class="btn" data-act="identify">IDENTIFY</button>
+        <button class="btn" data-act="split">SPLIT JARVIS</button>
+        <button class="btn" data-act="cascade">REACTOR CASCADE</button>
+      </section>
+
+      <section class="group">
+        <div class="label">SCENES</div>
+        <div class="chips" id="scene-chips"></div>
+      </section>
+
+      <section class="group">
+        <div class="label">MOVE JARVIS TO</div>
+        <div class="chips" id="move-chips"></div>
+      </section>
+
+      <section class="group">
+        <div class="label">OPEN APPLICATION</div>
+        <div class="chips" id="app-chips"></div>
+      </section>
+
+      <section class="group">
+        <div class="label">OPEN URL</div>
+        <form class="inline-form" id="url-form">
+          <input
+            class="text-input"
+            id="url-input"
+            type="url"
+            placeholder="https://gdg.community.dev/"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-small" type="submit">OPEN</button>
+        </form>
+      </section>
+
+      <!--
+        Scripted speech.
+
+        The LLM is the least controllable part of the stack, so every line the demo
+        actually needs exists here as a button. If the voice layer fails, the presenter
+        taps instead of asking and the room never learns the difference. SPEC.md §39
+        applied to speech.
+      -->
+      <section class="group">
+        <div class="label">JARVIS SAYS</div>
+        <div class="chips" id="phrase-chips"></div>
+        <form class="inline-form" id="speak-form">
+          <input
+            class="text-input"
+            id="speak-input"
+            placeholder="say something"
+            autocomplete="off"
+          />
+          <button class="btn btn-small" type="submit">SPEAK</button>
+        </form>
+      </section>
+
+      <div class="feedback" id="feedback"></div>
+    </main>
+
+    <!--
+      SPEC.md §33. Fixed to the bottom of the viewport, present on every scroll position,
+      never disabled, and the only red control on the page. If exactly one thing on this
+      page works, it has to be this one.
+    -->
+    <button class="release-all" id="release-all" hidden>RELEASE ALL</button>
+
+    <script src="/shared/stream.js"></script>
+    <script src="/shared/session.js"></script>
+    <script src="/control/control.js"></script>
+  </body>
+</html>
