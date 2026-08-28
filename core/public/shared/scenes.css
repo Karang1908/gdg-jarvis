@@ -225,7 +225,12 @@
   align-items: center;
   justify-content: center;
   gap: 0.5vh;
+
+  /* Fills the frame. A flash that leaves letterboxing reads as a video playing rather
+     than as the machine itself signalling. */
   width: 100%;
+  height: 100%;
+
   animation: identify-flash 620ms steps(1, end) infinite;
 }
 
@@ -233,8 +238,7 @@
   font-size: clamp(48px, 15vw, 260px);
   line-height: 0.94;
   letter-spacing: 0.12em;
-  color: var(--cyan-bright);
-  text-shadow: var(--glow-cyan);
+  animation: identify-name-flash 620ms steps(1, end) infinite;
 }
 
 .identify-tag {
@@ -242,21 +246,50 @@
   font-size: clamp(14px, 2vw, 34px);
   letter-spacing: 0.5em;
   text-indent: 0.5em;
-  color: var(--amber);
+  animation: identify-tag-flash 620ms steps(1, end) infinite;
 }
 
-/* Inverting rather than merely dimming: from the back of a room, a brightness change
-   reads as flicker, but a full inversion is unmistakably a machine signalling. */
+/*
+ * Strobe, not invert.
+ *
+ * filter: invert(1) is the obvious way to write this and it is wrong: on the inverted
+ * frame the node name comes out dark red on orange, which is the lowest-contrast thing on
+ * screen at exactly the moment it most needs to be read. This alternates between two
+ * frames that are each at full contrast — cyan on black, then black on cyan — so the name
+ * is legible from the back of the room in both halves of the cycle.
+ */
 @keyframes identify-flash {
   0%,
   49% {
-    background: transparent;
-    filter: none;
+    background: var(--void);
   }
   50%,
   100% {
     background: var(--cyan);
-    filter: invert(1);
+  }
+}
+
+@keyframes identify-name-flash {
+  0%,
+  49% {
+    color: var(--cyan-bright);
+    text-shadow: var(--glow-cyan);
+  }
+  50%,
+  100% {
+    color: var(--void);
+    text-shadow: none;
+  }
+}
+
+@keyframes identify-tag-flash {
+  0%,
+  49% {
+    color: var(--amber);
+  }
+  50%,
+  100% {
+    color: var(--void);
   }
 }
 
