@@ -24,11 +24,14 @@
   var escapePanel = document.getElementById('escape');
   var escapeFill = document.getElementById('escape-fill');
 
-  var nodeId = (JarvisStream.param('node') || 'NODE').toUpperCase();
+  var nodeId = JarvisStream.param('device') || '?';
   var ticket = JarvisStream.param('ticket');
   var isWall = JarvisStream.param('wall') === '1';
   var resumeScene = JarvisStream.param('scene');
 
+  // The overlay shows the device number as its identity, with the hostname underneath —
+  // the same pairing the wall and the controller use, so a teammate seeing their own screen
+  // taken over can read off the number the presenter is about to say.
   var context = { nodeId: nodeId, label: nodeId, capabilities: [] };
   var teardown = null;
   var pendingScene = null;
@@ -36,7 +39,7 @@
   var currentScene = null;
   var pendingActivity = [];
 
-  hudNode.textContent = nodeId;
+  hudNode.textContent = 'DEVICE ' + nodeId;
 
   /**
    * If Core stops talking for this long, close.
@@ -157,7 +160,7 @@
     resolveUrl: function () {
       if (!ticket) return null;
       return (
-        '/api/overlay/stream?node=' + encodeURIComponent(nodeId) + '&ticket=' + encodeURIComponent(ticket)
+        '/api/overlay/stream?device=' + encodeURIComponent(nodeId) + '&ticket=' + encodeURIComponent(ticket)
       );
     },
 
@@ -166,7 +169,8 @@
     on: {
       hello: function (payload) {
         context.label = payload.label || nodeId;
-        context.role = payload.role;
+        context.os = payload.os;
+        hudNode.textContent = 'DEVICE ' + nodeId + (payload.label ? ' · ' + payload.label : '');
 
         // Tickets are single use. This is the replacement for the one just spent, and
         // without storing it here a dropped stream could never come back.

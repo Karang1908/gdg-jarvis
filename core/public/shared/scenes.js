@@ -135,7 +135,7 @@
     root.appendChild(stage);
 
     var timers = [];
-    var nodeName = context.nodeId || 'NODE';
+    var nodeName = context.nodeId || '?';
 
     TAKEOVER_BEATS.forEach(function (beat) {
       timers.push(
@@ -172,7 +172,7 @@
           }
 
           if (beat.kind === 'identity') {
-            stage.appendChild(el('div', 'takeover-node', 'NODE ' + nodeName));
+            stage.appendChild(el('div', 'takeover-node', 'DEVICE ' + nodeName));
             stage.appendChild(el('div', 'takeover-line', 'CONTROL ESTABLISHED'));
             return;
           }
@@ -210,7 +210,12 @@
 
     stage.appendChild(arcReactor('min(38vh, 38vw)'));
     stage.appendChild(el('h1', 'headline wordmark', 'J.A.R.V.I.S.'));
-    stage.appendChild(el('div', 'label spaced', context.label || context.nodeId || ''));
+
+    // Number first, hostname second — the number is what the presenter says out loud.
+    var tag = el('div', 'label spaced');
+    tag.textContent =
+      'DEVICE ' + (context.nodeId || '?') + (context.label && context.label !== context.nodeId ? '  ·  ' + context.label : '');
+    stage.appendChild(tag);
 
     root.appendChild(stage);
     return null;
@@ -225,7 +230,9 @@
 
   function sceneIdentify(root, args, context) {
     clear(root);
-    var name = context.nodeId || 'NODE';
+    // The device number, three times, filling the screen. Someone in the audience has to be
+    // able to match it to what the presenter just said, from the back of the room.
+    var name = context.nodeId || '?';
 
     var stage = el('div', 'identify-stage');
     for (var i = 0; i < 3; i++) stage.appendChild(el('div', 'identify-name', name));
@@ -360,8 +367,8 @@
       'jarvis-agent  ' + (context.agentVersion || '1.0.0'),
       'transport     server-sent events',
       'core          ' + (global.location.host || 'jarvis-core'),
-      'node          ' + (context.nodeId || '?'),
-      'auth          per-node token, accepted',
+      'device        ' + (context.nodeId || '?') + '  ' + (context.label || ''),
+      'auth          join secret, accepted',
       'capabilities  ' + (context.capabilities || []).join(' '),
       'shell access  denied by design',
       '',
