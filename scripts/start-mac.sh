@@ -2,7 +2,7 @@
 #
 # Run the whole system on one Mac.
 #
-#   scripts/start-mac.sh              # Core + this Mac enrolled as MAIN
+#   scripts/start-mac.sh              # Core + this Mac enrolled as device 1
 #   scripts/start-mac.sh --core-only  # Core only; enrol agents by hand
 #   scripts/start-mac.sh --local      # bind to 127.0.0.1, nothing else can reach it
 #   scripts/start-mac.sh --port 4000
@@ -21,7 +21,7 @@ set -uo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT" || exit 1
 
-CONFIG="core/config/nodes.json"
+CONFIG="core/config/core.json"
 PORT=3000
 BIND=""
 START_AGENT=1
@@ -77,14 +77,14 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 if [ ! -f "$CONFIG" ]; then
-  warn "no node registry; generating one"
-  scripts/setup-kali.sh --tokens-only >/dev/null 2>&1 || {
+  warn "no configuration; generating one"
+  scripts/setup-kali.sh --secrets-only >/dev/null 2>&1 || {
     bad "could not generate $CONFIG"; exit 1; }
 fi
-ok "registry: $(node -e "console.log(Object.keys(require('./$CONFIG').nodes).join(' '))")"
+ok "configuration present"
 
 ADMIN=$(node -e "process.stdout.write(require('./$CONFIG').admin.token)")
-MAIN_TOKEN=$(node -e "process.stdout.write(require('./$CONFIG').nodes.MAIN.token)")
+JOIN_SECRET=$(node -e "process.stdout.write(require('./$CONFIG').join.secret)")
 
 # ---------------------------------------------------------------------------------------
 # Teardown
@@ -133,9 +133,9 @@ cleanup() {
   # Belt and braces. If anything above did not do its job, a teammate is looking at a
   # fullscreen window right now, and a stray process is worth more than tidiness.
   local strays
-  strays=$(pgrep -f 'jarvis-agent.sh --node MAIN' 2>/dev/null | wc -l | tr -d ' ')
+  strays=$(pgrep -f 'jarvis-agent.sh --server' 2>/dev/null | wc -l | tr -d ' ')
   if [ "$strays" != "0" ]; then
-    pkill -f 'jarvis-agent.sh --node MAIN' 2>/dev/null
+    pkill -f 'jarvis-agent.sh --server' 2>/dev/null
     warn "cleaned up $strays stray agent process(es)"
   fi
 
@@ -165,7 +165,7 @@ if ! curl -s --max-time 2 "$CORE_URL/healthz" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------------------
-# This Mac as MAIN
+# This Mac joins as a device
 # ---------------------------------------------------------------------------------------
 
 if [ "$START_AGENT" -eq 1 ]; then
@@ -173,7 +173,8 @@ if [ "$START_AGENT" -eq 1 ]; then
   # bash sets $! to the *last* command in it, so AGENT_PID would be sed's — and Ctrl+C
   # would kill the prefixer while leaving the agent, and its fullscreen overlay, running.
   # That is the exact failure DEVIATIONS.md D4 exists to prevent.
-  bash agent/jarvis-agent.sh --node MAIN --token "$MAIN_TOKEN" --server "$CORE_URL" &
+  # --wall so this Mac shows the Command Wall. It joins first, so it becomes device 1.
+  bash agent/jarvis-agent.sh --server "$CORE_URL" --secret "$JOIN_SECRET" --wall &
   AGENT_PID=$!
   sleep 2
 fi
@@ -202,18 +203,18 @@ printf '  On the overlay itself: hold Escape for a second to release just that s
 
 if [ "$BIND" != "127.0.0.1" ]; then
   bold ""
-  bold "Adding a teammate"
+  bold "Adding anyone else"
   printf '\n'
-  for node in ALPHA BETA GAMMA; do
-    token=$(node -e "process.stdout.write(require('./$CONFIG').nodes['$node'].token)" 2>/dev/null)
-    printf '  %-6s curl -s %s/join | bash -s %s %s\n' "$node" "$CORE_URL" "$node" "$token"
-  done
+  printf '  They join the same Wi-Fi this Mac is on, then run one line.\n'
+  printf '  The same line for everybody — no name, no token:\n'
   printf '\n'
-  printf '  Windows:  $env:JARVIS_NODE="BETA"; $env:JARVIS_TOKEN="<token>"\n'
-  printf '            iwr %s/join.ps1 -UseBasicParsing | iex\n' "$CORE_URL"
+  printf '    macOS     curl -s %s/join | bash\n' "$CORE_URL"
+  printf '    Windows   iwr %s/join.ps1 -UseBasicParsing | iex\n' "$CORE_URL"
+  printf '\n'
+  printf '  They become device 2, 3, 4 ... in the order they join.\n'
   printf '\n'
   warn "this Mac is reachable at $BIND on your current network"
-  warn "control needs the admin token, but use --local when you are not rehearsing"
+  warn "use --local when you are not rehearsing with other people"
 fi
 
 bold ""
