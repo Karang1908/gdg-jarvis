@@ -57,6 +57,16 @@ wall-clock time between machines, that is the bug.
 - Chromium's `--start-fullscreen` is unreliable on macOS; `--kiosk` works. Launch the
   binary directly, not via `open -a`, or you get no PID to terminate later.
 - The MCP Python SDK renamed `FastMCP` to `MCPServer` in 2.0.
+- **bash defers a trap until the foreground command finishes.** An SSE stream never
+  finishes, so `curl | while read` made SIGTERM unhandled and the agent had to be
+  SIGKILLed — skipping cleanup and orphaning the overlay. Both agents read through a FIFO
+  so the foreground command is the interruptible `read` builtin. Interactive Ctrl+C hides
+  this bug, because the terminal signals the whole process group.
+- For a backgrounded **pipeline**, `$!` is the *last* command, not the first. Piping an
+  agent through `sed` for a prettier prefix silently makes its recorded PID the prefixer's.
+- A non-interactive shell sets SIGINT to *ignore* for background jobs, and bash cannot trap
+  a signal that was ignored on entry. Testing Ctrl+C handling with `nohup cmd &` then
+  `kill -INT` proves nothing — use SIGTERM.
 
 ## Testing what the simulator cannot
 
