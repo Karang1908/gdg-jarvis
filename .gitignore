@@ -1,5 +1,6 @@
 # Local, per-operator configuration — never commit real tokens
 core/config/nodes.json
+core/config/*.bak
 agent/config.json
 .env
 
