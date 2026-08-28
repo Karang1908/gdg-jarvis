@@ -78,19 +78,67 @@ else
   problems=$((problems + 1))
 fi
 
-# The brain runs here now: Core, the MCP server, and the AI client all live on this
-# machine (DEVIATIONS.md D11). Wi-Fi is busy being the access point, so the LLM needs a
-# second route out — ethernet, or a phone tethered over USB. Without one, everything except
-# the AI layer still works, which is worth saying plainly rather than discovering on stage.
+# ---------------------------------------------------------------------------------------
+# Internet uplink
+#
+# The brain runs here now: Core, the MCP server, and the AI client all live on this machine
+# (DEVIATIONS.md D11). Wi-Fi is busy being the access point, so the LLM needs a second route
+# out — ethernet, or a phone tethered over USB.
+#
+# Three separate things have to be true, and checking only the first is how you end up
+# debugging on stage:
+#
+#   1. the route exists and is not the Wi-Fi card
+#   2. it actually reaches the internet — a phone with no signal still installs a route
+#   3. its subnet does not collide with 10.42.0.0/24, which would break the room silently
+# ---------------------------------------------------------------------------------------
+
+AP_SUBNET_PREFIX="10.42."
+
+describe_uplink() {
+  case "$1" in
+    usb*|enp*u*|rndis*) printf 'tethered phone or USB adapter' ;;
+    en*|eth*)           printf 'ethernet' ;;
+    wl*|wlan*)          printf 'wifi' ;;
+    *)                  printf 'unknown type' ;;
+  esac
+}
+
 UPLINK=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
-if [ -n "$UPLINK" ] && [ "$UPLINK" != "$WIFI_IF" ]; then
-  ok "internet uplink: $UPLINK (separate from the access point)"
-elif [ -n "$UPLINK" ]; then
-  warn "the only default route is $UPLINK, which is about to become the access point"
-  warn "plug in ethernet or tether a phone, or the LLM layer will have no internet"
-else
+
+if [ -z "$UPLINK" ]; then
   warn "no internet route — the local demo works fully, the AI layer will not"
-  warn "plug in ethernet or tether a phone over USB"
+  warn "tether a phone over USB, or plug in ethernet"
+elif [ "$UPLINK" = "$WIFI_IF" ]; then
+  warn "the only default route is $UPLINK, which is about to become the access point"
+  warn "tether a phone over USB, or the LLM layer will have no internet"
+else
+  ok "internet uplink: $UPLINK ($(describe_uplink "$UPLINK"))"
+
+  # A route is not connectivity. Probe something that answers fast and is not a captive
+  # portal; a 204 with no body is unambiguous in a way that a 200 from a hotel splash page
+  # is not.
+  if curl -s --max-time 6 -o /dev/null -w '%{http_code}' \
+       https://connectivitycheck.gstatic.com/generate_204 2>/dev/null | grep -q '^204$'; then
+    ok "the internet is actually reachable through it"
+  else
+    warn "$UPLINK has a route but nothing answered — check the phone has signal,"
+    warn "that tethering is still enabled, and that the cable is a data cable"
+  fi
+
+  # The one failure that looks like nothing. If the phone hands out 10.42.x.x, its route
+  # and JARVIS-NET's overlap, and devices become unreachable in a way that looks like the
+  # agents are broken rather than like a routing problem.
+  UPLINK_ADDR=$(ip -4 addr show "$UPLINK" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+  case "$UPLINK_ADDR" in
+    "$AP_SUBNET_PREFIX"*)
+      fail "$UPLINK is on $UPLINK_ADDR, which collides with JARVIS-NET's ${AP_SUBNET_PREFIX}0.0/24"
+      warn "change the phone's tethering subnet, or set JARVIS-NET to a different range"
+      problems=$((problems + 1))
+      ;;
+    "") ;;
+    *) ok "uplink subnet $UPLINK_ADDR does not collide with the access point" ;;
+  esac
 fi
 
 # WPA2 requires 8 characters. Checked here rather than at nmcli, whose failure for a short
