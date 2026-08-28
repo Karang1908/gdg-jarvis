@@ -51,6 +51,11 @@
 
 .wall-graph {
   flex: 1;
+
+  /* Flex items refuse to shrink below their content without this, so the activity panel
+     below was pushed off the bottom of the screen instead of the graph giving up space. */
+  min-height: 0;
+
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(210px, 40vw), 1fr));
   gap: 1.6vw;
@@ -173,7 +178,8 @@
  * ---------------------------------------------------------------------------------- */
 
 .wall-activity {
-  max-height: 26vh;
+  flex: none;
+  max-height: 24vh;
   overflow: hidden;
 }
 

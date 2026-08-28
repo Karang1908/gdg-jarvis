@@ -189,7 +189,11 @@
     if (entry.target) line.appendChild(el('span', 'act-target', entry.target));
 
     state.activityList.appendChild(line);
-    while (state.activityList.childNodes.length > 14) {
+
+    // Ten lines is what fits inside the panel's height cap at projector scale. Keeping
+    // more would push the newest ones out of the clipped region — the panel would fill up
+    // and then appear to stop updating.
+    while (state.activityList.childNodes.length > 10) {
       state.activityList.removeChild(state.activityList.firstChild);
     }
   }
