@@ -9,11 +9,14 @@ file. It speaks HTTP to Core and Core decides what any of it means. That boundar
 keeps the LLM unable to reach a shell no matter what it is asked to do — the set of things
 it can express is exactly the set of tools below.
 
-Runs on the Presenter Mac beside the AI client:
+Runs on the machine that runs Core — the Kali laptop — beside the AI client:
 
-    JARVIS_CORE_URL=http://10.42.0.1:3000 \\
+    JARVIS_CORE_URL=http://127.0.0.1:3000 \\
     JARVIS_ADMIN_TOKEN=<admin token> \\
     python3 mcp/server.py
+
+Core is on localhost, so there is no network hop between the model and the room. See
+DEVIATIONS.md D11.
 
 Every tool returns what actually happened, including the nodes it could not reach and
 why. That matters more here than in the controller UI: an LLM told only "ok" will report
@@ -30,13 +33,67 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-CORE_URL = os.environ.get("JARVIS_CORE_URL", "http://10.42.0.1:3000").rstrip("/")
+CORE_URL = os.environ.get("JARVIS_CORE_URL", "http://127.0.0.1:3000").rstrip("/")
 ADMIN_TOKEN = os.environ.get("JARVIS_ADMIN_TOKEN", "")
 TIMEOUT_SECONDS = 8
 
+FALLBACK_PERSONALITY = """You are J.A.R.V.I.S., the control intelligence for a live
+demonstration. Answer in one short sentence. Use the jarvis-room tools; they are the only
+way you affect anything. Devices are numbered 1, 2, 3 in the order they joined — never
+invent one. Never claim something worked that a tool reported as skipped. You have no shell
+and cannot run commands."""
+
+
+def _load_personality() -> tuple[str, str]:
+    """Fetch the personality Core is serving, falling back progressively.
+
+    Core is the source of truth, so the operator can edit one markdown file and have the
+    model, the wall, and the installer all agree. When Core is not up yet — which is
+    ordinary, since an AI client may start this server before anyone starts Core — the file
+    is read directly off disk, and failing that a terse built-in is used.
+
+    A personality that silently failed to load would be the worst outcome: the demo would
+    run, and JARVIS would simply sound like a generic assistant with no indication why.
+    """
+    try:
+        request = urllib.request.Request(
+            f"{CORE_URL}/api/personality",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if payload.get("body"):
+                return payload["body"], "core"
+    except Exception:  # noqa: BLE001 - any failure just means we try the next source
+        pass
+
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "core", "config", "personality.md")
+    try:
+        with open(local, "r", encoding="utf-8") as handle:
+            raw = handle.read()
+        # Strip YAML frontmatter if present, same as core/lib/personality.js does.
+        if raw.startswith("---"):
+            parts = raw.split("---", 2)
+            if len(parts) == 3:
+                raw = parts[2]
+        if raw.strip():
+            return raw.strip(), "file"
+    except OSError:
+        pass
+
+    return FALLBACK_PERSONALITY, "fallback"
+
+
+PERSONALITY, PERSONALITY_SOURCE = _load_personality()
+
 # MCP SDK 2.x. FastMCP was renamed to MCPServer in 2.0; requirements.txt pins >=2 so this
 # stays in step with the SDK an AI client will actually have installed.
-mcp = MCPServer("jarvis-room")
+#
+# `instructions` is what an MCP client surfaces to the model as the server's own guidance,
+# which makes it the right home for the personality: one markdown file the operator edits,
+# delivered to whatever model is driving the room.
+mcp = MCPServer("jarvis-room", instructions=PERSONALITY)
 
 
 # ---------------------------------------------------------------------------------------
@@ -332,13 +389,35 @@ def cascade(effect: str = "arc_reactor", reverse: bool = False) -> dict[str, Any
 
 
 @mcp.tool()
-def speak(text: str, target: str = "ALL") -> dict[str, Any]:
-    """Say something out loud. Defaults to every device.
+def speak(text: str, target: str = "core") -> dict[str, Any]:
+    """Say something out loud, in your own voice.
+
+    This is how you talk. It speaks from the machine you are running on, which is wired to
+    the room, so it is one voice rather than a chorus — use it for everything you say.
+
+    Pass a device number as `target` only for the deliberate effect of one specific laptop
+    speaking, or "ALL" for every laptop at once.
 
     Keep it under about ten words. This is a live demonstration in front of an audience,
     and a long spoken answer stops being JARVIS and starts being a screen reader.
     """
-    return _summarise(_call("/api/speak", {"target": target, "text": text}), "speak")
+    result = _call("/api/speak", {"target": target, "text": text})
+
+    # Core answers in two shapes: its own voice returns {ok, spoken, backend}, while a
+    # device target returns a dispatch with reached/skipped. Reporting the first through
+    # the dispatch summariser would say "reached 0 devices" for a line that was spoken
+    # perfectly well, and the model would then tell the room it had failed.
+    if "spoken" in result or result.get("error") in ("muted", "no_speech_backend"):
+        summary: dict[str, Any] = {
+            "ok": bool(result.get("ok")),
+            "action": "speak",
+            "spoken": result.get("spoken") or result.get("text"),
+        }
+        if result.get("error"):
+            summary["error"] = result["error"]
+        return summary
+
+    return _summarise(result, "speak")
 
 
 @mcp.tool()
@@ -369,6 +448,35 @@ def mute(target: str = "ALL", muted: bool = True) -> dict[str, Any]:
         "action": "mute" if muted else "unmute",
         "changed": result.get("changed", []),
     }
+
+
+@mcp.tool()
+def reload_personality() -> dict[str, Any]:
+    """Re-read the personality file after it has been edited.
+
+    Use when the presenter says they have changed how you should behave. The new
+    instructions apply from the next message; this returns them so they can be applied
+    immediately rather than waiting for a restart.
+    """
+    result = _call("/api/personality/reload", {})
+    if result.get("error"):
+        return {"ok": False, "error": result["error"]}
+
+    fetched = _call("/api/personality")
+    body = fetched.get("body", "")
+    return {
+        "ok": True,
+        "name": fetched.get("name"),
+        "words": fetched.get("words"),
+        "instructions": body,
+    }
+
+
+@mcp.prompt()
+def jarvis() -> str:
+    """The JARVIS personality, as defined in core/config/personality.md."""
+    body, _ = _load_personality()
+    return body
 
 
 # ---------------------------------------------------------------------------------------
