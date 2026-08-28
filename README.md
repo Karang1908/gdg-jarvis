@@ -34,6 +34,26 @@ Three surfaces, all served by Core:
 
 ---
 
+## Just want to see it work?
+
+On a Mac, with no Kali box and no teammates:
+
+```bash
+git clone https://github.com/Karang1908/gdg-jarvis.git
+cd gdg-jarvis
+scripts/start-mac.sh
+```
+
+That runs Core, enrols the Mac as `MAIN`, and prints the admin token and URLs. Open
+`/control/` on your phone or in a second window, paste the token, tap **TAKE THE ROOM** —
+the Mac goes fullscreen and becomes the Command Wall. Tap **RELEASE ALL** to get your
+desktop back. Ctrl+C stops everything and releases every screen.
+
+Teammates on the same Wi-Fi can join with the lines it prints. Everything works except
+JARVIS-NET itself, which is the only thing the Kali machine adds.
+
+---
+
 ## Bring it up from nothing
 
 ### 1. Kali — the access point and Core
