@@ -34,6 +34,7 @@
   var pendingScene = null;
   var lastState = null;
   var currentScene = null;
+  var pendingActivity = [];
 
   hudNode.textContent = nodeId;
 
@@ -69,6 +70,11 @@
     if (name === 'wall') {
       sceneRoot.classList.add('wall-mode');
       JarvisWall.render(sceneRoot, lastState, { self: nodeId });
+
+      // Drain whatever arrived while the takeover animation was still playing, so the
+      // wall appears with history rather than filling in from empty.
+      var backlog = pendingActivity.splice(-14);
+      for (var i = 0; i < backlog.length; i++) JarvisWall.activity(sceneRoot, backlog[i]);
       return;
     }
 
@@ -172,6 +178,13 @@
       state: function (payload) {
         lastState = payload;
         if (currentScene === 'wall') JarvisWall.render(sceneRoot, lastState, { self: nodeId });
+      },
+
+      activity: function (entry) {
+        // Buffered until the wall is on screen: Core replays recent activity on connect,
+        // which arrives while the takeover animation is still running.
+        if (currentScene === 'wall') JarvisWall.activity(sceneRoot, entry);
+        else pendingActivity.push(entry);
       },
     },
   });
