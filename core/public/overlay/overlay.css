@@ -1,0 +1,90 @@
+/*
+ * Overlay chrome.
+ *
+ * Only three things live here: the corner readouts, the escape hatch, and the wall mode
+ * padding. Everything else the overlay shows is a scene, styled in shared/scenes.css.
+ */
+
+/* --------------------------------------------------------------------------------------
+ * Corner readouts
+ *
+ * For the operator scanning the room, not for the audience — which is why they sit at the
+ * edge of the frame and stay below the brightness of whatever scene is running.
+ * ----------------------------------------------------------------------------------- */
+
+.hud {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.6ch;
+  padding: 1.6vh 2vw;
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.hud-tl {
+  top: 0;
+  left: 0;
+}
+
+.hud-tr {
+  top: 0;
+  right: 0;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Escape hatch
+ *
+ * Deliberately the highest layer on the page. Whatever a scene is doing, the thing that
+ * gives a teammate their desktop back has to be visible on top of it.
+ * ----------------------------------------------------------------------------------- */
+
+.escape {
+  position: fixed;
+  z-index: 100;
+  left: 50%;
+  bottom: 8vh;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4vh;
+  padding: 2.2vh 4vw;
+  background: rgba(0, 3, 8, 0.9);
+  border: 1px solid var(--amber-dim);
+}
+
+.escape-text {
+  font-size: clamp(13px, 1.5vw, 24px);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--amber);
+}
+
+.escape-bar {
+  width: min(40vw, 380px);
+  height: 6px;
+  background: rgba(255, 182, 72, 0.18);
+}
+
+.escape-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--amber);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Wall mode
+ *
+ * When MAIN's overlay settles into the Command Wall it needs the full frame rather than
+ * the centred grid every other scene uses.
+ * ----------------------------------------------------------------------------------- */
+
+.scene-root.wall-mode {
+  display: block;
+  place-items: initial;
+  padding: 4vh 4vw;
+}
