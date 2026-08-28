@@ -7,22 +7,35 @@ each entry names a specific demo-day failure that motivated it.
 ## Running it locally
 
 ```bash
-scripts/setup-kali.sh --tokens-only        # writes core/config/nodes.json (gitignored)
-node core/server.js --host 127.0.0.1 --port 3000
+scripts/start-mac.sh                       # Core + this Mac as device 1, one command
+scripts/setup-kali.sh --secrets-only       # writes core/config/core.json (gitignored)
 
-# a whole room on one machine
-scripts/sim-node.sh ALPHA <token> http://127.0.0.1:3000
-scripts/sim-node.sh BETA  <token> http://127.0.0.1:3000 --os windows
+# a whole room on one machine; reads the join secret from core.json itself
+scripts/sim-node.sh "Ravi-PC" --os windows
+scripts/sim-node.sh "anita-mbp"
 
 npm test                                   # wire encoding, incl. the real bash decoder
 scripts/health-check.sh http://127.0.0.1:3000
+scripts/install-mcp.sh --print             # what would go into Antigravity's config
 ```
 
-Node tokens are in `core/config/nodes.json`, which is gitignored. Get one with:
+Secrets live in `core/config/core.json`, gitignored:
 
 ```bash
-node -e "console.log(require('./core/config/nodes.json').nodes.ALPHA.token)"
+node -e "console.log(require('./core/config/core.json').admin.token)"
 ```
+
+## The model
+
+Devices are **not** configured in advance. One join secret admits any machine; Core numbers
+them 1, 2, 3 in join order and everything addresses them by that number. Numbers are stable
+across reconnects via a hostname+OS fingerprint — renumbering mid-demo would make
+"identify three" light up the wrong screen. `docs/DEVIATIONS.md` D8 and D9 carry the
+reasoning and the security trade.
+
+The admin token and the join secret do different jobs and must never be equal; Core refuses
+to boot if they are. The join secret is handed out inside `/join` and should be assumed to
+leak — what it buys is JARVIS on your own screen, nothing more.
 
 ## Constraints that are not obvious from the code
 
@@ -57,6 +70,14 @@ wall-clock time between machines, that is the bug.
 - Chromium's `--start-fullscreen` is unreliable on macOS; `--kiosk` works. Launch the
   binary directly, not via `open -a`, or you get no PID to terminate later.
 - The MCP Python SDK renamed `FastMCP` to `MCPServer` in 2.0.
+- Antigravity 2.x reads `~/.gemini/config/mcp_config.json`, shared by the IDE, the `agy`
+  CLI, and the SDK; workspace-local is `.agents/mcp_config.json`. Always merge into it —
+  it usually has other servers in it.
+- `say -v <name>` does **not** fail for a voice that is not installed; it silently falls
+  back to the system voice. Check against `say -v '?'` or a typo goes unnoticed until the
+  demo sounds wrong. Daniel is the only serious British male voice macOS ships.
+- Intent regexes are order-sensitive: scene phrases must be tested before `identify`, or
+  "show me the architecture" is read as identifying a device called "the".
 - **bash defers a trap until the foreground command finishes.** An SSE stream never
   finishes, so `curl | while read` made SIGTERM unhandled and the agent had to be
   SIGKILLed — skipping cleanup and orphaning the overlay. Both agents read through a FIFO
@@ -83,9 +104,10 @@ true, and it is the single assumption the whole design rests on.
 ```
 core/lib/wire.js          percent-encoding; the security boundary for the shell agents
 core/lib/commands.js      the only path to a node — single funnel, so logging cannot be missed
-core/lib/registry.js      presence follows the SSE connection, not the heartbeat
+core/lib/registry.js      dynamic enrollment, stable numbering, presence follows the socket
 core/lib/choreography.js  stagger and cascade timing
 core/public/shared/       design tokens, scenes, wall renderer — shared by all three UIs
+core/public/control/voice.js  local speech intents; no LLM in the path
 agent/                    macOS bash + Windows PowerShell, same wire protocol
 mcp/server.py             HTTP to Core only; contains no OS-specific logic by design
 ```
