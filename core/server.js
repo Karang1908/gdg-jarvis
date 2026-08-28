@@ -139,7 +139,14 @@ function pushState() {
 }
 
 registry.onChange(pushState);
-log.subscribe((entry) => observers.broadcast('activity', entry));
+
+// Activity reaches the wall overlay as well as the observer channel. Without this MAIN's
+// overlay shows a permanently empty SYSTEM ACTIVITY panel, which is worse than having no
+// panel at all — it reads as a system that has stopped rather than one that is idle.
+log.subscribe((entry) => {
+  observers.broadcast('activity', entry);
+  for (const connection of wallOverlays) connection.sendJson('activity', entry);
+});
 
 // Heartbeat fields (latency, awake, uptime) change without a registry event, so the wall
 // gets a tick as well. One second is below the point where a stale number is noticeable.
@@ -281,6 +288,12 @@ router.get('/api/overlay/stream', (req, res, context) => {
   if (node && node.role === 'wall') {
     wallOverlays.add(connection);
     connection.sendJson('state', registry.snapshot());
+
+    // Replay recent activity, exactly as the observer channel does. Without it the wall
+    // appears with an empty SYSTEM ACTIVITY panel and fills in only from whatever happens
+    // next — so everything the operator did during setup is invisible on the one surface
+    // built to show it.
+    for (const entry of log.recent(20)) connection.sendJson('activity', entry);
     const previousOnClose = connection.onClose;
     connection.onClose = (closed) => {
       wallOverlays.delete(connection);
@@ -375,6 +388,33 @@ router.post('/api/cascade', async (req, res, context) => {
     200,
     commands.cascade((body && body.effect) || 'arc_reactor', { source: 'api' }, Boolean(body && body.reverse))
   );
+});
+
+/**
+ * Mint an overlay URL for a node without commanding anything.
+ *
+ * The operator's escape valve. If a node's overlay is closed by accident, or the presenter
+ * wants the Command Wall on a second screen, or a scene needs checking during setup, this
+ * hands back a ticketed URL to paste into any browser. It issues no command and moves no
+ * screen, so it is safe to call while the demo is running.
+ */
+router.post('/api/overlay/url', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const nodeId = String(body.node || '').trim().toUpperCase();
+  if (!registry.has(nodeId)) return json(res, 400, { ok: false, error: 'node_unknown' });
+
+  const scene = body.scene ? validate.checkScene(body.scene) : null;
+  if (scene && !scene.ok) return json(res, 400, { ok: false, error: scene.reason });
+
+  json(res, 200, {
+    ok: true,
+    node: nodeId,
+    url: commands.overlayUrl(nodeId, auth, scene ? scene.value : null),
+    expiresIn: auth.TICKET_TTL_MS / 1000,
+  });
 });
 
 router.post('/api/identify', async (req, res, context) => {
