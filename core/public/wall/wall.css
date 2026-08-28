@@ -1,0 +1,104 @@
+/*
+ * Standalone wall page.
+ *
+ * Only the sign-in gate and the connection readout live here; the wall itself is styled
+ * in shared/wall.css so that this page and MAIN's overlay cannot diverge.
+ */
+
+#wall {
+  position: relative;
+  z-index: 20;
+  height: 100%;
+  padding: 4vh 4vw;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Sign-in gate
+ *
+ * This is the first thing anyone sees on the projector while setting up, so it is styled
+ * as part of the system rather than as a browser form.
+ * ----------------------------------------------------------------------------------- */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+}
+
+.gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+  min-width: min(90vw, 420px);
+  align-items: stretch;
+  text-align: center;
+}
+
+.gate-title {
+  font-size: clamp(22px, 3vw, 44px);
+  color: var(--cyan-bright);
+  text-shadow: var(--glow-cyan);
+}
+
+.gate-label {
+  font-size: 11px;
+  letter-spacing: var(--trace);
+  color: var(--cyan-dim);
+  text-align: left;
+}
+
+.gate-input {
+  font-family: var(--mono);
+  font-size: 16px;
+  letter-spacing: 0.2em;
+  padding: 0.9rem 1rem;
+  color: var(--ink);
+  background: rgba(0, 8, 16, 0.8);
+  border: 1px solid var(--cyan-dim);
+  outline: none;
+}
+
+.gate-input:focus {
+  border-color: var(--cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+.gate-button {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: var(--trace);
+  padding: 0.9rem 1rem;
+  color: var(--void);
+  background: var(--cyan);
+  border: none;
+  cursor: pointer;
+}
+
+.gate-button:hover {
+  background: var(--cyan-bright);
+}
+
+.gate-error {
+  font-size: 12px;
+  letter-spacing: var(--trace);
+  color: var(--alert);
+}
+
+/* --------------------------------------------------------------------------------------
+ * Connection readout
+ * ----------------------------------------------------------------------------------- */
+
+.link-state {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.6ch;
+  padding: 1.4vh 2vw;
+  opacity: 0.6;
+  pointer-events: none;
+}
