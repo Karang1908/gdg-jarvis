@@ -118,59 +118,79 @@ def _summarise(result: dict[str, Any], action: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_nodes() -> dict[str, Any]:
-    """List every authorized display and its live state.
+def list_devices() -> dict[str, Any]:
+    """List every enrolled device and its live state.
+
+    Devices are numbered 1, 2, 3 ... in the order they joined, and that number is how the
+    presenter and the audience refer to them. Each also reports its hostname, which is how
+    a person recognises their own laptop.
 
     Call this whenever the user refers to a machine ambiguously — "the Windows one", "the
-    other laptop", "that screen". Never guess a node name; the IDs are fixed and this is
-    the only place they come from.
+    other laptop", "Ravi's". Never invent a device; the room is whoever actually joined,
+    and this is the only place that list comes from.
 
-    Each node reports whether it is online, which operating system it runs, what it is
-    currently showing, its latency, and — importantly — whether its screen is awake. A node
-    that is online with a locked screen will accept commands and display nothing, so say so
-    rather than reporting it as ready.
+    Watch `screen_awake`: a device that is online with a locked screen accepts commands and
+    displays nothing. Say so rather than reporting it as ready. `muted` means it will not
+    speak.
     """
-    room = _call("/api/nodes")
+    room = _call("/api/devices")
     if not room.get("ok", True) and room.get("error"):
         return room
 
     return {
         "ok": True,
         "online": room.get("summary", {}).get("online", 0),
-        "configured": room.get("summary", {}).get("configured", 0),
-        "nodes": [
+        "known": room.get("summary", {}).get("known", 0),
+        "wall": room.get("wall"),
+        "devices": [
             {
-                "id": node["id"],
-                "label": node["label"],
-                "online": node["online"],
-                "os": node["os"],
-                "showing": node["scene"] if node["hasOverlay"] else None,
-                "screen_awake": node["displayAwake"],
-                "latency_ms": node["rttMs"],
-                "can": node["capabilities"],
+                "device": device["number"],
+                "hostname": device["hostname"],
+                "os": device["os"],
+                "online": device["online"],
+                "showing": device["scene"] if device["hasOverlay"] else None,
+                "screen_awake": device["displayAwake"],
+                "muted": device["muted"],
+                "is_wall": device["isWall"],
+                "latency_ms": device["rttMs"],
+                "can": device["capabilities"],
             }
-            for node in room.get("nodes", [])
+            for device in room.get("devices", [])
         ],
         "apps_available": room.get("apps", []),
     }
 
 
 @mcp.tool()
-def get_node(node: str) -> dict[str, Any]:
-    """Report one node's state in detail. `node` must be an ID from list_nodes()."""
-    room = _call("/api/nodes")
+def get_device(device: str) -> dict[str, Any]:
+    """Report one device's state in detail. Accepts a number or a hostname."""
+    room = _call("/api/devices")
     if not room.get("ok", True) and room.get("error"):
         return room
 
-    wanted = node.strip().upper()
-    for entry in room.get("nodes", []):
-        if entry["id"] == wanted:
-            return {"ok": True, "node": entry}
+    wanted = str(device).strip().lower()
+    entries = room.get("devices", [])
+
+    for entry in entries:
+        if str(entry["number"]) == wanted:
+            return {"ok": True, "device": entry}
+
+    matches = [e for e in entries if wanted in (e.get("hostname") or "").lower()]
+    if len(matches) == 1:
+        return {"ok": True, "device": matches[0]}
+    if len(matches) > 1:
+        # Refusing beats guessing: taking over the wrong screen because two laptops share a
+        # word in their name is not recoverable in front of an audience.
+        return {
+            "ok": False,
+            "error": "device_ambiguous",
+            "matches": [{"device": m["number"], "hostname": m["hostname"]} for m in matches],
+        }
 
     return {
         "ok": False,
-        "error": "node_unknown",
-        "known_nodes": [entry["id"] for entry in room.get("nodes", [])],
+        "error": "device_unknown",
+        "known_devices": [{"device": e["number"], "hostname": e["hostname"]} for e in entries],
     }
 
 
@@ -181,9 +201,9 @@ def get_node(node: str) -> dict[str, Any]:
 
 @mcp.tool()
 def takeover(target: str = "ALL") -> dict[str, Any]:
-    """Take over one authorized display, or the whole room.
+    """Take over one enrolled device, or the whole room.
 
-    `target` is a node ID or "ALL". "Take the room" means ALL.
+    `target` is a device number or "ALL". "Take the room" means ALL.
 
     Each machine puts a fullscreen JARVIS surface over whatever its user was doing. Their
     work is untouched underneath and comes back on release — nothing is closed, moved, or
@@ -194,7 +214,7 @@ def takeover(target: str = "ALL") -> dict[str, Any]:
 
 @mcp.tool()
 def release(target: str = "ALL") -> dict[str, Any]:
-    """Give the screens back. `target` is a node ID or "ALL".
+    """Give the screens back. `target` is a device number or "ALL".
 
     "Release the room" means ALL. Every overlay closes and each user's desktop returns
     exactly as they left it.
@@ -207,10 +227,10 @@ def release(target: str = "ALL") -> dict[str, Any]:
 
 @mcp.tool()
 def identify(target: str) -> dict[str, Any]:
-    """Make one named machine announce itself.
+    """Make one device announce itself.
 
-    The named node flashes its own name across its screen and highlights on the Command
-    Wall. Nothing else in the room reacts.
+    That device fills its screen with its own number and highlights on the Command Wall.
+    Nothing else in the room reacts.
 
     This is how the audience is shown that the machines are addressed independently, so it
     is worth using whenever someone asks which machine is which.
@@ -225,13 +245,13 @@ def identify(target: str) -> dict[str, Any]:
 
 @mcp.tool()
 def open_app(target: str, app: str) -> dict[str, Any]:
-    """Open an allowlisted application on a node.
+    """Open an allowlisted application on a device.
 
     `app` is a logical name — "chrome", "vscode", "spotify" — never a path, a filename, or
-    a command. list_nodes() returns the names that exist under `apps_available`; anything
+    a command. list_devices() returns the names that exist under `apps_available`; anything
     else is refused, and the refusal comes back as a skipped node with a reason.
 
-    The same logical name works on macOS and Windows; each node resolves it locally.
+    The same logical name works on macOS and Windows; each device resolves it locally.
     """
     return _summarise(
         _call("/api/command", {"target": target, "action": "open_app", "args": {"app": app}}),
@@ -241,7 +261,7 @@ def open_app(target: str, app: str) -> dict[str, Any]:
 
 @mcp.tool()
 def open_url(target: str, url: str) -> dict[str, Any]:
-    """Open a web page on a node.
+    """Open a web page on a device.
 
     Only http:// and https:// are accepted. Anything else — a file path, a custom scheme —
     is refused by Core before it reaches the machine.
@@ -259,7 +279,7 @@ def open_url(target: str, url: str) -> dict[str, Any]:
 
 @mcp.tool()
 def show_scene(target: str, scene: str) -> dict[str, Any]:
-    """Change what a node is displaying.
+    """Change what a device is displaying.
 
     Scenes: jarvis, reactor, identify, red_alert, blackout, network, gdg, terminal, wall,
     normal.
@@ -267,7 +287,7 @@ def show_scene(target: str, scene: str) -> dict[str, Any]:
     `network` draws the architecture of this system, and is the right scene when the
     presenter starts explaining how the demo works. `gdg` is the closing scene.
 
-    The node must already have been taken over.
+    The device must already have been taken over.
     """
     return _summarise(_call("/api/scene", {"target": target, "scene": scene}), "show_scene")
 
@@ -285,10 +305,10 @@ def broadcast_scene(scene: str = "jarvis") -> dict[str, Any]:
 
 @mcp.tool()
 def move_jarvis(destination: str) -> dict[str, Any]:
-    """Move JARVIS from wherever it is to one named node.
+    """Move JARVIS from wherever it is to one device.
 
-    "Move to Alpha", "go to Beta", "come back" (which means the presenter's own machine,
-    MAIN). The orb animates off one screen and onto the next.
+    "Move to two", "go to Ravi's", "come back". The orb animates off one screen and onto
+    the next.
 
     Purely visual. Nothing migrates between machines; every node keeps running its own
     agent throughout.
@@ -312,8 +332,8 @@ def cascade(effect: str = "arc_reactor", reverse: bool = False) -> dict[str, Any
 
 
 @mcp.tool()
-def speak(text: str, target: str = "MAIN") -> dict[str, Any]:
-    """Say something out loud on a node. Defaults to the presenter's machine.
+def speak(text: str, target: str = "ALL") -> dict[str, Any]:
+    """Say something out loud. Defaults to every device.
 
     Keep it under about ten words. This is a live demonstration in front of an audience,
     and a long spoken answer stops being JARVIS and starts being a screen reader.
@@ -323,7 +343,7 @@ def speak(text: str, target: str = "MAIN") -> dict[str, Any]:
 
 @mcp.tool()
 def set_volume(target: str, volume: int) -> dict[str, Any]:
-    """Set a node's output volume, 0 to 100."""
+    """Set a device's output volume, 0 to 100."""
     return _summarise(
         _call(
             "/api/command",
@@ -331,6 +351,24 @@ def set_volume(target: str, volume: int) -> dict[str, Any]:
         ),
         "set_volume",
     )
+
+
+@mcp.tool()
+def mute(target: str = "ALL", muted: bool = True) -> dict[str, Any]:
+    """Stop or resume JARVIS speaking on a device, or across the room.
+
+    A muted device still executes everything — it just makes no sound. Use this when the
+    presenter says "be quiet", "stop talking", or "mute yourself", and unmute with
+    muted=False.
+    """
+    result = _call("/api/mute", {"target": target, "muted": muted})
+    if result.get("error"):
+        return {"ok": False, "action": "mute", "error": result["error"]}
+    return {
+        "ok": True,
+        "action": "mute" if muted else "unmute",
+        "changed": result.get("changed", []),
+    }
 
 
 # ---------------------------------------------------------------------------------------
@@ -343,7 +381,7 @@ if __name__ == "__main__":
         # the presenter would see silence instead of a cause.
         raise SystemExit(
             "JARVIS_ADMIN_TOKEN is not set.\n"
-            "  It is the `admin.token` value in core/config/nodes.json on the Kali machine."
+            "  It is the `admin.token` value in core/config/core.json on the Core machine."
         )
 
     mcp.run()
