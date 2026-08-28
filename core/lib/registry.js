@@ -1,39 +1,69 @@
 'use strict';
 
 /**
- * The device registry — what SPEC.md §10 and §18 call the room's live state.
+ * The device registry.
  *
- * Presence here is derived from the command stream itself, not from heartbeats. When an
- * agent's SSE connection drops, the node is offline that instant; there is no 15-second
- * window in which the wall shows a machine that is already gone. Heartbeats remain, but
- * as a backstop for the one case the socket cannot detect: a wedged client holding the
- * connection open while no longer executing anything.
+ * Devices are not configured in advance. One arrives, presents the join secret, says what
+ * it is called and what it runs, and is given the next free number. That number is how
+ * everything else addresses it — the wall, the controller, the voice layer, and MCP all
+ * say "device 3", never a codename someone has to memorise.
  *
- * That inversion matters on stage. An operator who unplugs a laptop should see it leave
- * the wall before they finish looking up.
+ * Two properties matter more than they look.
+ *
+ * **Numbers are stable.** A laptop that drops off the Wi-Fi and comes back is still
+ * device 3. Renumbering mid-demo would be the single most confusing thing this system
+ * could do — the presenter says "identify three" and the wrong screen answers.
+ *
+ * **Presence follows the connection, not the heartbeat.** When a device's stream drops it
+ * leaves the wall that instant; there is no window in which the wall shows a machine that
+ * is already gone. Heartbeats remain as a backstop for the one case a live socket cannot
+ * reveal: a client that is wedged rather than gone.
  */
 
 const crypto = require('crypto');
 
 const log = require('./log');
 
-/** Heartbeat cadence asked of agents, and the silence after which we stop believing them. */
 const HEARTBEAT_MS = 5_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
 const SWEEP_MS = 2_000;
 
-/** Node IDs in the order the wall should draw them. Set from layout.json at boot. */
-let displayOrder = [];
+/** Devices by number. Insertion order is join order, which is also display order. */
+const devices = new Map();
 
-const nodes = new Map();
+/**
+ * Number → fingerprint, so a returning device reclaims its own slot.
+ *
+ * Kept separately from `devices` because it must outlive a disconnect: the whole point is
+ * that a laptop which drops off and rejoins is recognised.
+ */
+const fingerprints = new Map();
+
 const changeListeners = new Set();
 
-function emitChange(reason, nodeId) {
+let nextNumber = 1;
+
+/**
+ * Identify a physical machine across reconnects.
+ *
+ * Hostname plus OS is not a security boundary — it is trivially forgeable — and it does
+ * not need to be. Enrollment is already authenticated by the join secret; this only has to
+ * be stable enough that the same laptop gets the same number twice, which it is.
+ */
+function fingerprintOf(hostname, os) {
+  return crypto
+    .createHash('sha256')
+    .update(`${String(hostname).toLowerCase()}|${String(os).toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function emitChange(reason, number) {
   for (const listener of changeListeners) {
     try {
-      listener(reason, nodeId);
+      listener(reason, number);
     } catch (err) {
-      log.error('registry listener threw', { reason, node: nodeId, error: err.message });
+      log.error('registry listener threw', { reason, device: number, error: err.message });
     }
   }
 }
@@ -43,33 +73,44 @@ function onChange(listener) {
   return () => changeListeners.delete(listener);
 }
 
-/**
- * Seed the registry from configuration.
- *
- * Every configured node exists from boot, offline. The wall therefore shows GAMMA as a
- * dark slot rather than omitting it, which is the difference between an operator seeing
- * "three of four" and seeing nothing wrong at all.
- */
-function init(nodeConfigs, layout) {
-  nodes.clear();
+function reset() {
+  devices.clear();
+  fingerprints.clear();
+  nextNumber = 1;
+}
 
-  for (const [id, config] of Object.entries(nodeConfigs)) {
-    nodes.set(id, {
-      id,
-      label: config.label || id,
-      role: config.role || 'node',
+/**
+ * Enroll a device, or welcome back one that has been here before.
+ *
+ * Returns the device record. Never fails for an unknown machine — that is the point.
+ */
+function enroll(meta) {
+  const fingerprint = fingerprintOf(meta.hostname, meta.os);
+
+  let number = fingerprints.get(fingerprint);
+  let device = number ? devices.get(number) : null;
+
+  if (!device) {
+    number = nextNumber++;
+    fingerprints.set(fingerprint, number);
+
+    device = {
+      number,
+      fingerprint,
+
+      hostname: meta.hostname || `device-${number}`,
+      os: meta.os || 'unknown',
+      agentVersion: meta.agentVersion || null,
+      capabilities: [],
+
+      // Set by an agent started with --wall. The device showing the Command Wall.
+      isWall: false,
 
       online: false,
       sessionId: null,
       connectedAt: null,
       disconnectedAt: null,
 
-      os: null,
-      hostname: null,
-      agentVersion: null,
-      capabilities: [],
-
-      // Self-reported by the agent each heartbeat.
       state: 'offline',
       hasOverlay: false,
       displayAwake: false,
@@ -77,254 +118,294 @@ function init(nodeConfigs, layout) {
       lastHeartbeatAt: null,
       heartbeatSeq: 0,
 
-      // What Core last told this node to display. Distinct from hasOverlay: the scene is
-      // Core's intent, hasOverlay is the agent's observed reality. When they disagree,
-      // something failed and the wall should show it.
       scene: 'normal',
+      muted: false,
 
       agentConnection: null,
       overlayConnection: null,
 
       lastCommandAt: null,
       lastError: null,
-    });
+    };
+    devices.set(number, device);
+    log.good('device enrolled', { device: number, host: device.hostname, os: device.os });
+  } else {
+    // A returning machine may have been renamed, or reinstalled, since it was last here.
+    device.hostname = meta.hostname || device.hostname;
+    device.agentVersion = meta.agentVersion || device.agentVersion;
+    log.info('device returned', { device: number, host: device.hostname });
   }
 
-  const configured = [...nodes.keys()];
-  const ordered = (layout && Array.isArray(layout.order) ? layout.order : []).filter((id) =>
-    nodes.has(id)
-  );
-  // Anything configured but missing from layout.json still has to appear somewhere.
-  displayOrder = [...ordered, ...configured.filter((id) => !ordered.includes(id))];
-
-  const unknown = (layout && layout.order ? layout.order : []).filter((id) => !nodes.has(id));
-  if (unknown.length) {
-    log.warn('layout names nodes that are not configured', { nodes: unknown.join(',') });
+  if (device.agentConnection) {
+    // A device reconnecting while Core still holds its old socket is normal — a Wi-Fi blip
+    // leaves a connection the client has already given up on. The live agent wins;
+    // refusing it would strand the device until a timeout it cannot influence.
+    log.warn('replacing an existing agent connection', { device: number });
+    device.agentConnection.destroy();
+    device.agentConnection = null;
   }
 
-  return displayOrder;
-}
+  device.os = meta.os || device.os;
+  device.capabilities = Array.isArray(meta.capabilities) ? meta.capabilities : [];
+  device.sessionId = crypto.randomBytes(12).toString('hex');
+  device.lastError = null;
 
-function get(nodeId) {
-  return nodes.get(nodeId) || null;
-}
+  if (meta.wantsWall) claimWall(number);
 
-function has(nodeId) {
-  return nodes.has(nodeId);
-}
-
-function ids() {
-  return [...displayOrder];
-}
-
-/** Online nodes, in display order. The set a broadcast actually reaches. */
-function onlineNodes() {
-  return displayOrder.map((id) => nodes.get(id)).filter((node) => node && node.online);
+  return device;
 }
 
 /**
- * Open a session for a freshly authenticated agent.
+ * Designate the device that shows the Command Wall.
  *
- * A node reconnecting while an old connection is still attached is normal — a Wi-Fi blip
- * leaves Core holding a socket the client has already given up on. The previous
- * connection is destroyed rather than refused, so the live agent always wins. Refusing
- * the new one would strand the node until a timeout it cannot influence.
+ * Exclusive: only one device can be the wall, because two Command Walls disagreeing about
+ * the room is worse than none.
  */
-function openSession(nodeId, meta) {
-  const node = nodes.get(nodeId);
-  if (!node) return null;
-
-  if (node.agentConnection) {
-    log.warn('replacing an existing agent connection', { node: nodeId });
-    node.agentConnection.destroy();
-    node.agentConnection = null;
-  }
-
-  node.sessionId = crypto.randomBytes(12).toString('hex');
-  node.os = meta.os || 'unknown';
-  node.hostname = meta.hostname || null;
-  node.agentVersion = meta.agentVersion || null;
-  node.capabilities = Array.isArray(meta.capabilities) ? meta.capabilities : [];
-  node.lastError = null;
-
-  return node.sessionId;
-}
-
-/** True only if this session is the one Core currently believes in. */
-function sessionValid(nodeId, sessionId) {
-  const node = nodes.get(nodeId);
-  return Boolean(node && node.sessionId && sessionId && node.sessionId === sessionId);
+function claimWall(number) {
+  if (!devices.has(number)) return false;
+  for (const device of devices.values()) device.isWall = device.number === number;
+  log.info('wall assigned', { device: number });
+  emitChange('wall', number);
+  return true;
 }
 
 /**
- * Attach the agent's command stream. This is the moment a node becomes online.
+ * The device that should render the wall.
+ *
+ * Falls back to the lowest-numbered online device, so there is always somewhere for the
+ * room's state to appear even if nobody passed --wall.
  */
-function attachAgent(nodeId, connection) {
-  const node = nodes.get(nodeId);
-  if (!node) return false;
+function wallDevice() {
+  for (const device of devices.values()) {
+    if (device.isWall) return device;
+  }
+  for (const device of devices.values()) {
+    if (device.online) return device;
+  }
+  return null;
+}
 
-  node.agentConnection = connection;
-  node.online = true;
-  node.state = 'ready';
-  node.connectedAt = Date.now();
-  node.lastHeartbeatAt = Date.now();
+function isWall(number) {
+  const wall = wallDevice();
+  return Boolean(wall && wall.number === Number(number));
+}
+
+function get(number) {
+  return devices.get(Number(number)) || null;
+}
+
+function has(number) {
+  return devices.has(Number(number));
+}
+
+/** Every known device number, in join order. */
+function ids() {
+  return [...devices.keys()];
+}
+
+/** Online devices, in join order. The set a broadcast actually reaches. */
+function onlineDevices() {
+  return [...devices.values()].filter((device) => device.online);
+}
+
+/**
+ * Resolve what a human or a model said into a device number.
+ *
+ * Accepts the number itself, and also a hostname — because someone looking at the wall
+ * will read out "Ravi's MacBook" as readily as "3", and refusing that would be pedantry.
+ * Hostname matching is deliberately strict about ambiguity: two machines that both match
+ * produce a refusal rather than a guess at which screen to take over.
+ */
+function resolve(input) {
+  if (input === null || input === undefined) return { ok: false, reason: 'device_missing' };
+
+  const text = String(input).trim();
+  if (text === '') return { ok: false, reason: 'device_missing' };
+  if (text.toUpperCase() === 'ALL') return { ok: true, all: true };
+
+  if (/^\d+$/.test(text)) {
+    const number = Number(text);
+    if (devices.has(number)) return { ok: true, all: false, number };
+    return { ok: false, reason: 'device_unknown' };
+  }
+
+  const needle = text.toLowerCase();
+  const matches = [...devices.values()].filter(
+    (device) => device.hostname && device.hostname.toLowerCase().includes(needle)
+  );
+
+  if (matches.length === 1) return { ok: true, all: false, number: matches[0].number };
+  if (matches.length > 1) return { ok: false, reason: 'device_ambiguous' };
+  return { ok: false, reason: 'device_unknown' };
+}
+
+function sessionValid(number, sessionId) {
+  const device = get(number);
+  return Boolean(device && device.sessionId && sessionId && device.sessionId === sessionId);
+}
+
+/** Attach a device's command stream. This is the moment it becomes online. */
+function attachAgent(number, connection) {
+  const device = get(number);
+  if (!device) return false;
+
+  device.agentConnection = connection;
+  device.online = true;
+  device.state = 'ready';
+  device.connectedAt = Date.now();
+  device.lastHeartbeatAt = Date.now();
 
   connection.onClose = () => {
-    // Only tear down if this is still the current connection. A reconnect that replaced
-    // it will have already fired this handler for the old socket.
-    if (node.agentConnection !== connection) return;
+    if (device.agentConnection !== connection) return;
 
-    node.agentConnection = null;
-    node.online = false;
-    node.state = 'offline';
-    node.sessionId = null;
-    node.disconnectedAt = Date.now();
-    node.hasOverlay = false;
-    node.rttMs = null;
+    device.agentConnection = null;
+    device.online = false;
+    device.state = 'offline';
+    device.sessionId = null;
+    device.disconnectedAt = Date.now();
+    device.hasOverlay = false;
+    device.rttMs = null;
 
-    log.warn('node disconnected', { node: nodeId });
-    emitChange('disconnect', nodeId);
+    log.warn('device disconnected', { device: number, host: device.hostname });
+    emitChange('disconnect', number);
   };
 
-  log.good('node registered', {
-    node: nodeId,
-    os: node.os,
-    host: node.hostname,
-    caps: node.capabilities.length,
-  });
-  emitChange('connect', nodeId);
+  emitChange('connect', number);
   return true;
 }
 
 /**
  * Attach an overlay's scene stream.
  *
- * Independent of the agent connection: the overlay is a browser process the agent
- * launched, and it reaches Core on its own. Core needs to know it exists so that
- * identify() can pick between "flash the overlay already on screen" and "the agent must
- * open one first" (PROTOCOL.md §1).
+ * Independent of the agent connection: the overlay is a browser the agent launched, and it
+ * reaches Core on its own. Core needs to know it exists so identify() can choose between
+ * flashing an overlay already on screen and asking the agent to open one.
  */
-function attachOverlay(nodeId, connection) {
-  const node = nodes.get(nodeId);
-  if (!node) return false;
+function attachOverlay(number, connection) {
+  const device = get(number);
+  if (!device) return false;
 
-  if (node.overlayConnection) node.overlayConnection.destroy();
-  node.overlayConnection = connection;
+  if (device.overlayConnection) device.overlayConnection.destroy();
+  device.overlayConnection = connection;
 
   connection.onClose = () => {
-    if (node.overlayConnection !== connection) return;
-    node.overlayConnection = null;
-    node.scene = 'normal';
-    emitChange('overlay-detach', nodeId);
+    if (device.overlayConnection !== connection) return;
+    device.overlayConnection = null;
+    device.scene = 'normal';
+    emitChange('overlay-detach', number);
   };
 
-  log.info('overlay attached', { node: nodeId });
-  emitChange('overlay-attach', nodeId);
+  emitChange('overlay-attach', number);
   return true;
 }
 
-/** Record a heartbeat (PROTOCOL.md §5). */
-function heartbeat(nodeId, fields) {
-  const node = nodes.get(nodeId);
-  if (!node) return false;
+function heartbeat(number, fields) {
+  const device = get(number);
+  if (!device) return false;
 
-  // A sequence number that went backwards means the agent process restarted while its
-  // socket survived. Rare, but it makes rtt and overlay state meaningless until the next
-  // register, so say so rather than silently reporting stale values.
-  if (fields.seq !== undefined && fields.seq < node.heartbeatSeq) {
-    log.warn('agent restarted without re-registering', { node: nodeId });
+  if (fields.seq !== undefined && fields.seq < device.heartbeatSeq) {
+    log.warn('agent restarted without re-enrolling', { device: number });
   }
 
-  node.lastHeartbeatAt = Date.now();
-  node.heartbeatSeq = fields.seq !== undefined ? fields.seq : node.heartbeatSeq + 1;
-  if (fields.state) node.state = fields.state;
-  if (fields.overlay !== undefined) node.hasOverlay = Boolean(fields.overlay);
-  if (fields.awake !== undefined) node.displayAwake = Boolean(fields.awake);
-  if (fields.rtt !== undefined && Number.isFinite(fields.rtt)) node.rttMs = fields.rtt;
+  device.lastHeartbeatAt = Date.now();
+  device.heartbeatSeq = fields.seq !== undefined ? fields.seq : device.heartbeatSeq + 1;
+  if (fields.state) device.state = fields.state;
+  if (fields.overlay !== undefined) device.hasOverlay = Boolean(fields.overlay);
+  if (fields.awake !== undefined) device.displayAwake = Boolean(fields.awake);
+  if (fields.rtt !== undefined && Number.isFinite(fields.rtt)) device.rttMs = fields.rtt;
 
   return true;
 }
 
-/** Note what Core last asked this node to display. */
-function setScene(nodeId, scene) {
-  const node = nodes.get(nodeId);
-  if (!node) return;
-  node.scene = scene;
-  node.lastCommandAt = Date.now();
-  emitChange('scene', nodeId);
+function setScene(number, scene) {
+  const device = get(number);
+  if (!device) return;
+  device.scene = scene;
+  device.lastCommandAt = Date.now();
+  emitChange('scene', number);
 }
 
-function noteError(nodeId, message) {
-  const node = nodes.get(nodeId);
-  if (!node) return;
-  node.lastError = message;
-  emitChange('error', nodeId);
+function noteError(number, message) {
+  const device = get(number);
+  if (!device) return;
+  device.lastError = message;
+  emitChange('error', number);
 }
 
 /**
- * Does this node advertise the capability an action needs?
+ * Does this device advertise the capability an action needs?
  *
- * SPEC.md §9 and §30 both insist on this: a node declares what it can do at registration
- * and nothing may assume more. A Windows machine with no speech backend simply does not
- * list `speak`, and asking for it produces a clean refusal rather than a silent no-op.
+ * A Windows machine with no speech backend simply does not list `speak`, and asking for it
+ * produces a clean refusal rather than a silent no-op.
  */
-function supports(nodeId, capability) {
-  const node = nodes.get(nodeId);
-  if (!node) return false;
-  return node.capabilities.includes(capability);
+function supports(number, capability) {
+  const device = get(number);
+  if (!device) return false;
+  return device.capabilities.includes(capability);
 }
 
-/**
- * The wall's view of the room. Connections are deliberately absent — this gets
- * JSON.stringify'd straight onto the observer channel.
- */
+/** Remove a device entirely. Used when the operator dismisses one from the controller. */
+function forget(number) {
+  const device = get(number);
+  if (!device) return false;
+
+  if (device.agentConnection) device.agentConnection.destroy();
+  if (device.overlayConnection) device.overlayConnection.destroy();
+
+  fingerprints.delete(device.fingerprint);
+  devices.delete(device.number);
+
+  log.warn('device removed', { device: number, host: device.hostname });
+  emitChange('forget', number);
+  return true;
+}
+
+/** The room, as JSON. Connections are deliberately absent. */
 function snapshot() {
   const now = Date.now();
+  const wall = wallDevice();
 
   return {
     at: now,
-    order: displayOrder,
-    nodes: displayOrder.map((id) => {
-      const node = nodes.get(id);
-      const silentFor = node.lastHeartbeatAt ? now - node.lastHeartbeatAt : null;
+    order: ids(),
+    wall: wall ? wall.number : null,
+    devices: [...devices.values()].map((device) => {
+      const silentFor = device.lastHeartbeatAt ? now - device.lastHeartbeatAt : null;
 
       return {
-        id: node.id,
-        label: node.label,
-        role: node.role,
-        online: node.online,
-        state: node.state,
-        os: node.os,
-        hostname: node.hostname,
-        capabilities: node.capabilities,
-        scene: node.scene,
-        hasOverlay: node.hasOverlay,
-        displayAwake: node.displayAwake,
-        rttMs: node.rttMs,
+        number: device.number,
+        hostname: device.hostname,
+        os: device.os,
+        isWall: Boolean(wall && wall.number === device.number),
+        online: device.online,
+        state: device.state,
+        capabilities: device.capabilities,
+        scene: device.scene,
+        hasOverlay: device.hasOverlay,
+        displayAwake: device.displayAwake,
+        muted: device.muted,
+        rttMs: device.rttMs,
         silentForMs: silentFor,
 
-        // True when the socket is up but heartbeats stopped: the wedged-client case the
-        // connection alone cannot reveal.
-        stale: Boolean(node.online && silentFor !== null && silentFor > HEARTBEAT_TIMEOUT_MS),
+        // Socket up but heartbeats stopped: the wedged-client case a connection alone
+        // cannot reveal.
+        stale: Boolean(device.online && silentFor !== null && silentFor > HEARTBEAT_TIMEOUT_MS),
 
-        uptimeMs: node.connectedAt && node.online ? now - node.connectedAt : null,
-        lastError: node.lastError,
+        uptimeMs: device.connectedAt && device.online ? now - device.connectedAt : null,
+        lastError: device.lastError,
       };
     }),
     summary: {
-      configured: displayOrder.length,
-      online: displayOrder.filter((id) => nodes.get(id).online).length,
-      withOverlay: displayOrder.filter((id) => nodes.get(id).hasOverlay).length,
-      asleep: displayOrder.filter((id) => {
-        const node = nodes.get(id);
-        return node.online && !node.displayAwake;
-      }).length,
+      known: devices.size,
+      online: onlineDevices().length,
+      withOverlay: [...devices.values()].filter((d) => d.hasOverlay).length,
+      asleep: [...devices.values()].filter((d) => d.online && !d.displayAwake).length,
     },
   };
 }
 
 /**
- * Drop nodes whose heartbeats stopped even though the socket is still open.
+ * Drop devices whose heartbeats stopped even though the socket is still open.
  *
  * The socket-close path handles every ordinary disconnect. This exists purely for the
  * client that is hung rather than gone, which on a Wi-Fi network with roaming clients
@@ -332,26 +413,30 @@ function snapshot() {
  */
 const sweeper = setInterval(() => {
   const now = Date.now();
-  for (const node of nodes.values()) {
-    if (!node.online || !node.lastHeartbeatAt) continue;
-    if (now - node.lastHeartbeatAt <= HEARTBEAT_TIMEOUT_MS * 2) continue;
+  for (const device of devices.values()) {
+    if (!device.online || !device.lastHeartbeatAt) continue;
+    if (now - device.lastHeartbeatAt <= HEARTBEAT_TIMEOUT_MS * 2) continue;
 
-    log.warn('node stopped heartbeating, dropping', {
-      node: node.id,
-      silentMs: now - node.lastHeartbeatAt,
+    log.warn('device stopped heartbeating, dropping', {
+      device: device.number,
+      silentMs: now - device.lastHeartbeatAt,
     });
-    if (node.agentConnection) node.agentConnection.destroy();
+    if (device.agentConnection) device.agentConnection.destroy();
   }
 }, SWEEP_MS);
 sweeper.unref();
 
 module.exports = {
-  init,
+  reset,
+  enroll,
   get,
   has,
   ids,
-  onlineNodes,
-  openSession,
+  resolve,
+  onlineDevices,
+  claimWall,
+  wallDevice,
+  isWall,
   sessionValid,
   attachAgent,
   attachOverlay,
@@ -359,8 +444,10 @@ module.exports = {
   setScene,
   noteError,
   supports,
+  forget,
   snapshot,
   onChange,
+  fingerprintOf,
   HEARTBEAT_MS,
   HEARTBEAT_TIMEOUT_MS,
 };
