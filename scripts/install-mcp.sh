@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# Register the JARVIS MCP server with Antigravity.
+# Register JARVIS with Antigravity: the MCP server, and the personality.
 #
 #   scripts/install-mcp.sh                              # global, for the CLI and the IDE
 #   scripts/install-mcp.sh --server http://10.42.0.1:3000
 #   scripts/install-mcp.sh --workspace /path/to/project # project-local instead
 #   scripts/install-mcp.sh --print                      # show the JSON, write nothing
+#   scripts/install-mcp.sh --no-agent                   # MCP only, leave the persona alone
+#
+# Run this on the machine that runs Core. Core, the MCP server, and the AI client all live
+# together there, so the default server address is localhost.
 #
 # Antigravity 2.x shares one config across the IDE, the `agy` CLI, and the SDK:
 #
@@ -25,6 +29,7 @@ CORE_URL=""
 TARGET=""
 WORKSPACE=""
 PRINT_ONLY=0
+INSTALL_AGENT=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,6 +37,7 @@ while [ $# -gt 0 ]; do
     --workspace) WORKSPACE="${2:-}"; shift 2 ;;
     --name) SERVER_NAME="${2:-jarvis-room}"; shift 2 ;;
     --print) PRINT_ONLY=1; shift ;;
+    --no-agent) INSTALL_AGENT=0; shift ;;
     --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -68,13 +74,11 @@ if [ -z "$ADMIN_TOKEN" ]; then
   exit 1
 fi
 
-# Default to whatever this machine can actually reach. On the Core machine that is its own
-# LAN address; the presenter's Mac in a real room points at the Kali box instead.
+# This is meant to run alongside Core, so localhost is the right default and removes a
+# network hop between the model and the room. --server overrides it for the unusual case of
+# driving a Core on another machine.
 if [ -z "$CORE_URL" ]; then
-  LAN=$(ipconfig getifaddr en0 2>/dev/null || true)
-  [ -n "$LAN" ] || LAN="127.0.0.1"
-  CORE_URL="http://$LAN:3000"
-  warn "no --server given; using $CORE_URL"
+  CORE_URL="http://127.0.0.1:3000"
 fi
 
 # Prefer a virtualenv interpreter if one exists, because that is where the MCP SDK will be.
@@ -179,6 +183,39 @@ chmod 600 "$TARGET"
 ok "wrote $TARGET (mode 600)"
 
 # ---------------------------------------------------------------------------------------
+# Personality
+#
+# Antigravity loads ~/.gemini/config/agents/<name>/agent.md as a named custom agent, and
+# .agents/AGENTS.md from a workspace as system instructions. The personality is written to
+# both so it applies whether the operator runs `agy` from this checkout or from anywhere.
+#
+# core/config/personality.md stays the single source. This copies it; it never becomes the
+# place you edit, because two copies that can disagree is exactly the failure this avoids.
+# ---------------------------------------------------------------------------------------
+
+if [ "$INSTALL_AGENT" -eq 1 ] && [ "$PRINT_ONLY" -eq 0 ]; then
+  bold ""
+  bold "Personality"
+
+  SOURCE="$REPO_ROOT/core/config/personality.md"
+  if [ ! -f "$SOURCE" ]; then
+    warn "no core/config/personality.md; skipping"
+  else
+    AGENT_DIR="$HOME/.gemini/config/agents/jarvis"
+    mkdir -p "$AGENT_DIR"
+    cp "$SOURCE" "$AGENT_DIR/agent.md"
+    ok "custom agent   $AGENT_DIR/agent.md"
+
+    mkdir -p "$REPO_ROOT/.agents"
+    cp "$SOURCE" "$REPO_ROOT/.agents/AGENTS.md"
+    ok "workspace      $REPO_ROOT/.agents/AGENTS.md"
+
+    WORDS=$(wc -w < "$SOURCE" | tr -d ' ')
+    ok "$WORDS words — edit core/config/personality.md and run this again to update"
+  fi
+fi
+
+# ---------------------------------------------------------------------------------------
 
 bold ""
 bold "Next"
@@ -187,7 +224,8 @@ printf '  1. Start Core, if it is not already running.\n'
 printf '  2. Restart Antigravity so it re-reads the config.\n'
 printf '  3. Ask it:  "how many devices are online?"\n'
 printf '\n'
-printf '  It has 14 tools. It cannot run a shell command through any of them.\n'
+printf '  It has 15 tools and cannot run a shell command through any of them.\n'
+printf '  Its personality comes from core/config/personality.md.\n'
 printf '\n'
 warn "this file now contains the admin token — it is the key to every enrolled device"
 printf '\n'
