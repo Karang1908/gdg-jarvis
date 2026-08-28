@@ -20,6 +20,8 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
+const personality = require('./lib/personality');
+
 const auth = require('./lib/auth');
 const bus = require('./lib/bus');
 const choreography = require('./lib/choreography');
@@ -28,6 +30,7 @@ const httpLib = require('./lib/http');
 const log = require('./lib/log');
 const registry = require('./lib/registry');
 const validate = require('./lib/validate');
+const voice = require('./lib/voice');
 
 const { json, text, readBody, serveStatic } = httpLib;
 
@@ -45,6 +48,7 @@ function parseArgs(argv) {
     config: path.join(__dirname, 'config', 'core.json'),
     apps: path.join(__dirname, 'config', 'apps.json'),
     layout: path.join(__dirname, 'config', 'layout.json'),
+    personality: path.join(__dirname, 'config', 'personality.md'),
   };
 
   for (let i = 2; i < argv.length; i += 2) {
@@ -65,6 +69,9 @@ function parseArgs(argv) {
         break;
       case '--layout':
         options.layout = path.resolve(value);
+        break;
+      case '--personality':
+        options.personality = path.resolve(value);
         break;
       case '--help':
       case '-h':
@@ -91,8 +98,10 @@ const options = parseArgs(process.argv);
 // ---------------------------------------------------------------------------------
 
 try {
-  auth.load(options.config);
+  const config = auth.load(options.config);
   validate.loadApps(options.apps);
+  voice.init(config.voice || {});
+  personality.load(options.personality);
   choreography.init(require(options.layout));
   registry.reset();
 } catch (err) {
@@ -342,7 +351,21 @@ router.post('/api/mute', async (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
   const body = await readBody(req);
   if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
-  json(res, 200, commands.setMuted(body.target || 'ALL', Boolean(body.muted)));
+  const muted = Boolean(body.muted);
+  const target = body.target ? String(body.target) : 'ALL';
+
+  // ALL means everything that can make a noise, including JARVIS's own voice. Muting the
+  // devices but leaving Core talking would be the opposite of what the button says.
+  if (target.toUpperCase() === 'ALL' || target.toLowerCase() === 'core') {
+    voice.setEnabled(!muted);
+    if (muted) voice.silence();
+  }
+
+  const result = target.toLowerCase() === 'core'
+    ? { ok: true, target: 'core', muted, changed: ['core'] }
+    : commands.setMuted(target, muted);
+
+  json(res, 200, result);
 });
 
 /** Designate which device shows the Command Wall. */
@@ -464,21 +487,52 @@ router.post('/api/identify', async (req, res, context) => {
   json(res, 200, commands.identify(body.target, auth, { source: 'api' }));
 });
 
+/**
+ * Speak.
+ *
+ * Defaults to JARVIS's own voice on this machine rather than to any device. Passing an
+ * explicit target still sends it to devices, which is what "every laptop says it at once"
+ * needs — but the ordinary case is one voice, here.
+ */
 router.post('/api/speak', async (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
   const body = await readBody(req);
   if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
 
+  const target = body.target ? String(body.target).toLowerCase() : 'core';
+
+  if (target === 'core' || target === 'jarvis') {
+    return json(res, 200, commands.speakAsJarvis(body.text, { source: 'api' }));
+  }
+
   json(
     res,
     200,
-    commands.dispatch(
-      body.target || choreography.homeNode(),
-      'speak',
-      { text: body.text, voice: body.voice },
-      { source: 'api' }
-    )
+    commands.dispatch(body.target, 'speak', { text: body.text, voice: body.voice }, { source: 'api' })
   );
+});
+
+/** What JARVIS's voice is doing, and the personality it is running. */
+router.get('/api/voice', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  json(res, 200, { ok: true, ...voice.describe(), personality: personality.summary() });
+});
+
+/**
+ * The personality.
+ *
+ * Served so the MCP server — and anything else driving the room — reads the same file the
+ * operator edits, without needing to share a filesystem with Core.
+ */
+router.get('/api/personality', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  json(res, 200, { ok: true, ...personality.get() });
+});
+
+/** Re-read personality.md without restarting Core, so it can be tuned during rehearsal. */
+router.post('/api/personality/reload', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  json(res, 200, { ok: true, ...personality.load(options.personality) });
 });
 
 // --- Enrollment (§7) -----------------------------------------------------------------
@@ -605,6 +659,7 @@ function shutdown(signal) {
 
   console.log('');
   log.warn(`${signal} — releasing the room before exit`);
+  voice.silence();
   commands.release('ALL', { source: 'shutdown' });
 
   // Give the writes a moment to reach the sockets, then go regardless.

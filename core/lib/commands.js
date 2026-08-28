@@ -22,6 +22,7 @@ const crypto = require('crypto');
 
 const log = require('./log');
 const registry = require('./registry');
+const voice = require('./voice');
 const validate = require('./validate');
 const choreography = require('./choreography');
 
@@ -500,6 +501,38 @@ function acknowledge(nodeId, commandId, status, message) {
 }
 
 /**
+ * Speak as JARVIS, from the machine running Core.
+ *
+ * This is the default voice. It is not dispatched to any device because JARVIS is one
+ * presence with one voice, and because it has to work before a single device has enrolled
+ * — the room hears "Yes, sir" whether or not anyone has joined yet.
+ *
+ * Logged exactly like a dispatched command so the wall shows it alongside everything else.
+ */
+function speakAsJarvis(text, context = {}) {
+  const speech = validate.checkSpeech(text);
+  if (!speech.ok) {
+    log.deny('speech refused', { reason: speech.reason, source: context.source || 'unknown' });
+    return { ok: false, error: speech.reason };
+  }
+
+  const state = voice.describe();
+  if (!state.available) {
+    log.warn('JARVIS has no voice on this machine', { text: speech.value });
+    return { ok: false, error: 'no_speech_backend', text: speech.value };
+  }
+  if (!voice.isEnabled()) {
+    log.info('SPEAK suppressed (muted)', { text: speech.value });
+    return { ok: false, error: 'muted', text: speech.value };
+  }
+
+  log.good('JARVIS', { says: speech.value, source: context.source || 'unknown' });
+  voice.speak(speech.value);
+
+  return { ok: true, spoken: speech.value, backend: state.backend };
+}
+
+/**
  * Mute or unmute a device's speech.
  *
  * Room-level state rather than something sent to the agent: a muted device that goes
@@ -529,6 +562,7 @@ function recent(limit = 25) {
 
 module.exports = {
   dispatch,
+  speakAsJarvis,
   setMuted,
   takeover,
   release,
