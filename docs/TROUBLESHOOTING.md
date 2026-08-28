@@ -155,9 +155,73 @@ check whether it has drifted onto a different band.
 
 ---
 
+## Tethering Kali to a phone over USB
+
+The intended arrangement: Wi-Fi runs the access point, the phone carries the internet the
+model needs. Check it with the phone plugged in:
+
+```bash
+scripts/setup-kali.sh --check
+```
+
+That reports the uplink interface, whether the internet is actually reachable through it,
+and whether its subnet collides with JARVIS-NET.
+
+### Android
+
+Plug in, then **Settings → Network → Hotspot & tethering → USB tethering**. Linux sees an
+RNDIS or NCM interface (`usb0`, `enp0s20u1`) and NetworkManager configures it with no help.
+This is the easy path — if you have a choice of phones, use the Android one.
+
+### iPhone
+
+Needs more:
+
+```bash
+sudo apt install usbmuxd libimobiledevice6 ipheth-utils
+```
+
+Then plug in, **unlock the phone**, accept **Trust This Computer**, and turn on **Personal
+Hotspot**. The interface appears as `eth1` or similar. If nothing appears, `systemctl
+restart usbmuxd` and re-plug. The trust prompt only appears on an unlocked screen, and a
+locked phone silently does nothing.
+
+### It is a charging cable
+
+The most common cause of "USB tethering does nothing". Plenty of cables carry power and no
+data. Swap the cable before debugging anything else.
+
+### The phone is also your controller
+
+If one phone is both tethering to Kali and running `/control/`, it has to be on JARVIS-NET
+Wi-Fi *and* serving cellular over USB at the same time. That works, but Android sometimes
+decides to route tethered traffic over its Wi-Fi connection — which here has no internet —
+and the model goes quiet for no visible reason.
+
+Use a different device for the controller if you have one: a second phone, or just a
+browser window on the presenter's Mac. If you only have the one phone, test the combination
+before the day rather than assuming it.
+
+### It worked, then stopped
+
+The phone locked, the hotspot timed out with no clients, or the cable moved. USB tethering
+keeps the phone charging from the laptop, so battery is rarely the cause. Re-check with
+`scripts/setup-kali.sh --check`.
+
+### None of it works and the talk is in ten minutes
+
+Nothing about the demo needs the internet except the model. Everything in
+[REHEARSAL.md](REHEARSAL.md)'s run of show can be driven from `/control/` — the takeover,
+identify, scenes, move, cascade, release, and every spoken line under **JARVIS SAYS**. Run
+it from the controller and the room cannot tell.
+
+---
+
 ## The presenter's Mac loses the internet
 
-The dual-homing in SPEC.md §29, and the most confusing failure in the setup.
+Only relevant if you are still running the AI layer on the Mac. Since DEVIATIONS.md D11 the
+brain runs on Kali, and the Mac is an ordinary device that needs nothing but JARVIS-NET —
+so the usual answer is that it does not matter.
 
 ```bash
 scripts/health-check.sh http://10.42.0.1:3000
