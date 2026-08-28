@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>JARVIS — Command Wall</title>
+
+    <!--
+      SPEC.md §18. Opened fullscreen on the Presenter Mac, which drives the main display
+      and both teleprompters, so this one page is the whole "JARVIS Command Wall".
+
+      Also reachable from any browser on JARVIS-NET with the admin token, which is how a
+      second operator watches the room during rehearsal.
+    -->
+    <link rel="stylesheet" href="/shared/jarvis.css" />
+    <link rel="stylesheet" href="/shared/scenes.css" />
+    <link rel="stylesheet" href="/shared/wall.css" />
+    <link rel="stylesheet" href="/wall/wall.css" />
+  </head>
+
+  <body>
+    <div class="atmosphere"></div>
+
+    <!-- Shown until the operator signs in. -->
+    <div class="gate" id="gate">
+      <form class="gate-form panel" id="gate-form">
+        <div class="label">JARVIS CORE</div>
+        <div class="gate-title wordmark">J.A.R.V.I.S.</div>
+        <label class="gate-label" for="gate-token">ADMIN TOKEN</label>
+        <input
+          class="gate-input"
+          id="gate-token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          autofocus
+        />
+        <button class="gate-button" type="submit">AUTHENTICATE</button>
+        <div class="gate-error" id="gate-error" hidden>REJECTED</div>
+      </form>
+    </div>
+
+    <main id="wall" hidden></main>
+
+    <div class="link-state" id="link-state">
+      <span class="dot" id="link-dot"></span>
+      <span class="label" id="link-text">CONNECTING</span>
+    </div>
+
+    <div class="scanlines"></div>
+
+    <script src="/shared/stream.js"></script>
+    <script src="/shared/session.js"></script>
+    <script src="/shared/scenes.js"></script>
+    <script src="/shared/wall-view.js"></script>
+    <script src="/wall/wall.js"></script>
+  </body>
+</html>
