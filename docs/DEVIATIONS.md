@@ -111,16 +111,17 @@ and deserves to see that it is working.
 
 ---
 
-## D5 — MAIN's overlay is the Command Wall
+## D5 — The wall device's overlay is the Command Wall
 
 **Spec:** §18 puts the Command Wall fullscreen on the Presenter Mac; §43 has
-`takeover(ALL)` switch every display to JARVIS. MAIN is both.
+`takeover(ALL)` switch every display to JARVIS. The presenter's machine is both.
 
 **Problem:** undefined interaction. A takeover overlay on MAIN covers the wall the
 audience is supposed to be reading.
 
-**Change:** MAIN is a normal node whose overlay resolves *into* the wall. The takeover
-animation plays, then the page settles into the Command Wall scene. Release closes the
+**Change:** the wall device — the one whose agent was started with `--wall`, and otherwise
+the lowest-numbered device online — is a normal device whose overlay resolves *into* the
+wall. The takeover animation plays, then the page settles into the Command Wall scene. Release closes the
 overlay and the presenter's slides return untouched, exactly as §32 Phase 8 requires.
 
 One page, one process, one release path — the same as every other node.
@@ -174,12 +175,97 @@ with §35's documented invocation, and warns when used.
 
 ---
 
+## D8 — Any number of devices, enrolled by a shared secret
+
+**Spec:** §8 defines a fixed roster with a pre-shared token per node; §28 requires that
+"only explicitly configured Node IDs may register".
+
+**Problem:** that model does not survive contact with a real room. It fixes the guest list
+before anyone arrives, so a teammate who turns up unplanned cannot join, an extra laptop
+means editing JSON and restarting Core, and every person has to be handed the *right*
+token out of four that look identical. It also asks the presenter to remember which
+codename is which machine while talking to an audience.
+
+**Change:** one join secret for the whole demo, baked by Core into the script it serves at
+`/join`. Any device presenting it enrolls and is assigned the next free number. There is no
+roster, no per-device token, and no upper limit.
+
+What is deliberately kept from §1 and §28:
+
+- Joining the Wi-Fi still grants nothing. Enrollment is a separate, authenticated step.
+- The admin token — the one that controls *other people's* machines — is unchanged, is
+  never handed out, and is what every control endpoint requires.
+- Every enrollment and every refusal is logged with its source address.
+- The operator can see every device on the wall and remove one with `/api/forget`.
+
+**The trade, stated plainly:** anyone who obtains the join secret can enroll a device. The
+secret is inside a script handed to teammates, so it should be assumed to leak. What that
+buys an attacker is the ability to put a JARVIS overlay **on their own screen**. It does not
+let them see the room, command another device, or reach the admin token. Core refuses to
+start if `admin.token` and `join.secret` are ever equal, because that mistake would turn a
+handout into the key to every laptop.
+
+---
+
+## D9 — Devices are numbered, not named
+
+**Spec:** §3 and §8 use fixed codenames — ALPHA, BETA, GAMMA, MAIN.
+
+**Problem:** codenames are a second thing to memorise, on top of which physical laptop is
+which. Under stage lighting the presenter has to translate "the Windows one" to "BETA" to a
+machine on a table, and the audience has no way to check the translation.
+
+**Change:** devices are numbered in join order and addressed by number everywhere — the
+wall, the controller, the voice layer, and MCP. Each also reports its **hostname and OS**,
+which is what a person uses to recognise their own laptop, shown under the number rather
+than instead of it.
+
+Numbers are stable across reconnects, keyed on a hostname+OS fingerprint. A laptop that
+drops off the Wi-Fi and returns is still device 3. Renumbering mid-demo would be the single
+most confusing thing this system could do: the presenter says "identify three" and the wrong
+screen answers.
+
+Hostnames are also accepted as targets, because someone reading the wall will say "Ravi's
+MacBook" as readily as "3" — but an ambiguous hostname is refused rather than resolved to a
+guess.
+
+---
+
+## D10 — Voice input is local, and the microphone is a control
+
+**Spec:** §30 puts natural language entirely in the LLM, reached through MCP.
+
+**Problem:** two things. The LLM path needs internet and adds a round trip to moments that
+have to be instant; and nothing in the spec lets the presenter stop the system listening,
+even though they spend most of the demo talking to an audience rather than to JARVIS.
+
+**Change, part one:** the controller does its own speech recognition and matches it against
+a fixed list of phrases in the browser. No model, no server round trip, no LLM in the path.
+It cannot invent a command that was never spoken, and it keeps working when the AI layer
+does not. The MCP path remains, unchanged, for anything richer.
+
+**Change, part two:** a microphone toggle, closed by default and closed again the moment it
+is tapped. The icon carries a slash at rest so its state is legible without reading the
+label, and whatever was heard is displayed even when it matched nothing — because a live
+mic that did not recognise a phrase and a dead mic must never look the same.
+
+Separately, a **JARVIS-audible** toggle mutes JARVIS's speech. The two are deliberately
+distinct and worded so: the microphone is the presenter's, the other is JARVIS's voice. A
+muted device still executes everything; it simply makes no sound, and reports `muted` as a
+skip reason so the wall shows why rather than swallowing it.
+
+**Honest limitation:** Chrome performs speech recognition in the cloud, so the microphone
+needs the presenter's tethered internet. Everything else on the controller works with none.
+
+---
+
 ## Not changed
 
 For the avoidance of doubt, these remain exactly as specified:
 
-- The trust model in §1 — joining the Wi-Fi grants nothing; only an enrolled agent with a
-  valid per-node token receives commands.
+- The trust model in §1 — joining the Wi-Fi grants nothing; only a device that enrolled
+  with the join secret receives commands, and only the admin token commands other people's
+  machines. See D8 for what changed underneath and what did not.
 - The capability denylist in §12 — no `run_shell`, no `run_powershell`, no
   `execute_code`. The LLM never reaches a shell.
 - The application allowlist in §13 — logical names only, never paths or shell strings.
