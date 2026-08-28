@@ -1,0 +1,25 @@
+# Local, per-operator configuration — never commit real tokens
+core/config/nodes.json
+agent/config.json
+.env
+
+# Runtime state
+core/logs/
+*.log
+
+# Dedicated browser profiles created by the agent at runtime
+.jarvis-overlay-profile/
+/tmp/jarvis-*
+
+# Python (MCP server only — agents are dependency-free by design)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node — core is dependency-free, but keep these out if anything is ever added
+node_modules/
+
+# OS noise
+.DS_Store
+Thumbs.db
