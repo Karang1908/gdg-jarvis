@@ -313,8 +313,13 @@ function takeover(target, auth, context, resumeScene = null) {
   }
 
   const result = dispatch(target, 'takeover', {}, context, perNode);
+
+  // Record what the node settles into, not the animation it plays getting there. Storing
+  // 'takeover' left the wall reporting every node as TAKEOVER indefinitely, and made a
+  // reconnect resume into a transition rather than a resting scene.
   for (const entry of result.dispatched) {
-    registry.setScene(entry.node, resumeScene || 'takeover');
+    const node = registry.get(entry.node);
+    registry.setScene(entry.node, resumeScene || (node && node.role === 'wall' ? 'wall' : 'jarvis'));
   }
   return result;
 }
