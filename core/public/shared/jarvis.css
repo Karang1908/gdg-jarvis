@@ -62,6 +62,18 @@
   box-sizing: border-box;
 }
 
+/*
+ * The hidden attribute must win.
+ *
+ * The UA rule [hidden] { display: none } has attribute specificity and loses to any class
+ * selector that sets a display value — which is most components here. Without this, the
+ * overlay's escape hatch renders on screen during a takeover and the controller's console
+ * shows behind its own sign-in gate.
+ */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
