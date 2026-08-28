@@ -268,13 +268,19 @@ function dispatch(target, action, args, context = {}, perNodeArgs = null) {
  * The ticket is scoped to this node and single-use, so it authorises exactly one browser
  * to read exactly one screen's scene stream (PROTOCOL.md §8).
  */
-function overlayUrl(nodeId, auth) {
+function overlayUrl(nodeId, auth, initialScene = null) {
   const { ticket } = auth.issueTicket('overlay', nodeId);
   const node = registry.get(nodeId);
   const url = new URL('/overlay/', coreOrigin);
   url.searchParams.set('node', nodeId);
   url.searchParams.set('ticket', ticket);
   if (node && node.role === 'wall') url.searchParams.set('wall', '1');
+
+  // Set when an overlay is being reopened after a reconnect. The page boots straight into
+  // this scene rather than replaying the takeover animation, so a Wi-Fi blip does not
+  // announce itself to the audience.
+  if (initialScene) url.searchParams.set('scene', initialScene);
+
   return url.href;
 }
 
@@ -285,7 +291,7 @@ function overlayUrl(nodeId, auth) {
  * its own ticketed URL. MAIN's URL carries wall=1, which is what makes its overlay settle
  * into the Command Wall instead of an idle JARVIS scene — see DEVIATIONS.md D5.
  */
-function takeover(target, auth, context) {
+function takeover(target, auth, context, resumeScene = null) {
   const resolved = resolveTargets(target);
   if (!resolved.ok) return { ok: false, error: resolved.reason, dispatched: [], skipped: [] };
 
@@ -294,17 +300,22 @@ function takeover(target, auth, context) {
     return node && node.online;
   });
 
-  const stagger = choreography.takeoverStagger(reachable);
+  // A resume is one node coming back, not a room-wide cue, so it skips the stagger and
+  // reopens immediately into the scene it was already showing.
+  const stagger = resumeScene ? new Map() : choreography.takeoverStagger(reachable);
+
   const perNode = new Map();
   for (const nodeId of reachable) {
     perNode.set(nodeId, {
-      url: overlayUrl(nodeId, auth),
+      url: overlayUrl(nodeId, auth, resumeScene),
       delay: stagger.get(nodeId) || 0,
     });
   }
 
   const result = dispatch(target, 'takeover', {}, context, perNode);
-  for (const entry of result.dispatched) registry.setScene(entry.node, 'takeover');
+  for (const entry of result.dispatched) {
+    registry.setScene(entry.node, resumeScene || 'takeover');
+  }
   return result;
 }
 
