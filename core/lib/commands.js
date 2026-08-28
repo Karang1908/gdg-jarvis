@@ -148,15 +148,20 @@ function prepareArgs(action, rawArgs, node) {
   }
 }
 
-/** Resolve a target into the concrete list of nodes it names. */
+/**
+ * Resolve a target into the concrete list of devices it names.
+ *
+ * Delegates to the registry, which understands device numbers, hostnames, and ALL. An
+ * ambiguous hostname comes back as a refusal rather than a guess — taking over the wrong
+ * screen because two laptops share a word in their name is not a recoverable mistake in
+ * front of an audience.
+ */
 function resolveTargets(target) {
-  const check = validate.checkNodeId(target, registry.ids());
-  if (!check.ok) return { ok: false, reason: check.reason };
+  const resolved = registry.resolve(target);
+  if (!resolved.ok) return { ok: false, reason: resolved.reason };
 
-  if (check.isBroadcast) {
-    return { ok: true, target: 'ALL', nodeIds: registry.ids() };
-  }
-  return { ok: true, target: check.value, nodeIds: [check.value] };
+  if (resolved.all) return { ok: true, target: 'ALL', nodeIds: registry.ids() };
+  return { ok: true, target: resolved.number, nodeIds: [resolved.number] };
 }
 
 /**
@@ -167,8 +172,14 @@ function resolveTargets(target) {
  */
 function sendTo(nodeId, action, rawArgs, context) {
   const node = registry.get(nodeId);
-  if (!node) return { skipped: { node: nodeId, reason: 'node_unknown' } };
+  if (!node) return { skipped: { node: nodeId, reason: 'device_unknown' } };
   if (!node.online) return { skipped: { node: nodeId, reason: 'offline' } };
+
+  // A muted device executes everything except making a noise. Refusing here rather than
+  // at the agent keeps the reason visible on the wall instead of silently swallowing it.
+  if (action === 'speak' && node.muted) {
+    return { skipped: { node: nodeId, reason: 'muted' } };
+  }
 
   const capability = REQUIRED_CAPABILITY[action];
   if (capability && !registry.supports(nodeId, capability)) {
@@ -274,7 +285,7 @@ function overlayUrl(nodeId, auth, initialScene = null) {
   const url = new URL('/overlay/', coreOrigin);
   url.searchParams.set('node', nodeId);
   url.searchParams.set('ticket', ticket);
-  if (node && node.role === 'wall') url.searchParams.set('wall', '1');
+  if (registry.isWall(nodeId)) url.searchParams.set('wall', '1');
 
   // Set when an overlay is being reopened after a reconnect. The page boots straight into
   // this scene rather than replaying the takeover animation, so a Wi-Fi blip does not
@@ -318,8 +329,7 @@ function takeover(target, auth, context, resumeScene = null) {
   // 'takeover' left the wall reporting every node as TAKEOVER indefinitely, and made a
   // reconnect resume into a transition rather than a resting scene.
   for (const entry of result.dispatched) {
-    const node = registry.get(entry.node);
-    registry.setScene(entry.node, resumeScene || (node && node.role === 'wall' ? 'wall' : 'jarvis'));
+    registry.setScene(entry.node, resumeScene || (registry.isWall(entry.node) ? 'wall' : 'jarvis'));
   }
   return result;
 }
@@ -489,6 +499,29 @@ function acknowledge(nodeId, commandId, status, message) {
   return true;
 }
 
+/**
+ * Mute or unmute a device's speech.
+ *
+ * Room-level state rather than something sent to the agent: a muted device that goes
+ * offline and returns must come back muted, and an agent that never receives the command
+ * because it was mid-reconnect would otherwise come back talking.
+ */
+function setMuted(target, muted) {
+  const resolved = resolveTargets(target);
+  if (!resolved.ok) return { ok: false, error: resolved.reason, changed: [] };
+
+  const changed = [];
+  for (const nodeId of resolved.nodeIds) {
+    const device = registry.get(nodeId);
+    if (!device) continue;
+    device.muted = Boolean(muted);
+    changed.push(nodeId);
+  }
+
+  log.info(muted ? 'MUTED' : 'UNMUTED', { target: resolved.target, devices: changed.length });
+  return { ok: true, target: resolved.target, muted: Boolean(muted), changed };
+}
+
 /** Recent command records, newest first. Feeds the wall's execution panel. */
 function recent(limit = 25) {
   return [...pending.values()].slice(-limit).reverse();
@@ -496,6 +529,7 @@ function recent(limit = 25) {
 
 module.exports = {
   dispatch,
+  setMuted,
   takeover,
   release,
   scene,
