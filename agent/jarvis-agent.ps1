@@ -8,9 +8,9 @@
 
         iwr http://10.42.0.1:3000/join.ps1 -UseBasicParsing | iex
 
-    Or, with arguments:
-
-        powershell -ExecutionPolicy Bypass -File jarvis-agent.ps1 -Node BETA -Token <TOKEN>
+    That is the whole thing. No device name and no token — Core bakes its own address and
+    the join secret into the script when it serves it, and assigns this machine a number
+    on arrival. The number is printed on enrollment.
 
     Per SPEC.md §15 this does not need parity with macOS. Each capability is probed and
     advertised only if it actually works, so a machine without speech simply never
@@ -20,9 +20,10 @@
 # No [CmdletBinding()] on purpose: it turns this into an advanced script, and advanced
 # scripts do not receive $args — which is the only way the `iex` form can pass anything.
 param(
-    [string]$Node = $env:JARVIS_NODE,
-    [string]$Token = $env:JARVIS_TOKEN,
-    [string]$Server = '@@CORE_URL@@'
+    [string]$Server = '@@CORE_URL@@',
+    [string]$Secret = '@@JOIN_SECRET@@',
+    [string]$Name = $env:JARVIS_NAME,
+    [switch]$Wall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,40 +31,36 @@ $AgentVersion = '1.0.0'
 
 # Left unreplaced when the file is run straight from a checkout rather than served by Core.
 if ($Server -like '@@*') { $Server = 'http://10.42.0.1:3000' }
+if ($Secret -like '@@*') { $Secret = $env:JARVIS_JOIN_SECRET }
 
 # ---------------------------------------------------------------------------------------
 # Arguments
 # ---------------------------------------------------------------------------------------
 
-# `iex` gives no way to pass parameters, so the piped form reads them from the environment:
-#   $env:JARVIS_NODE='BETA'; $env:JARVIS_TOKEN='...'; iwr .../join.ps1 -UseBasicParsing | iex
-if (-not $Node -and $args -and $args.Count -ge 1) { $Node = $args[0] }
-if (-not $Token -and $args -and $args.Count -ge 2) { $Token = $args[1] }
+if (-not $Secret) {
+    $secure = Read-Host -Prompt 'Join secret' -AsSecureString
+    $Secret = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+}
 
-if (-not $Node) {
+if (-not $Secret) {
     Write-Host ''
-    Write-Host '  JARVIS Node Agent' -ForegroundColor Cyan
-    Write-Host ''
-    Write-Host '    $env:JARVIS_NODE  = "BETA"'
-    Write-Host '    $env:JARVIS_TOKEN = "<token>"'
+    Write-Host '  No join secret. Use the line Core printed:' -ForegroundColor Yellow
     Write-Host "    iwr $Server/join.ps1 -UseBasicParsing | iex"
     Write-Host ''
     return
 }
 
-if (-not $Token) {
-    $secure = Read-Host -Prompt "Token for $Node" -AsSecureString
-    $Token = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-}
+# The name a human reads off the wall. COMPUTERNAME is what Windows calls this machine.
+if (-not $Name) { $Name = $env:COMPUTERNAME }
 
-$Node = $Node.ToUpper()
 $Server = $Server.TrimEnd('/')
 
 # ---------------------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------------------
 
+$script:DeviceNumber = $null
 $script:SessionId = $null
 $script:OverlayProcess = $null
 $script:HeartbeatRunspace = $null
@@ -127,6 +124,19 @@ $script:Speech = $null
 try {
     Add-Type -AssemblyName System.Speech -ErrorAction Stop
     $script:Speech = New-Object System.Speech.Synthesis.SpeechSynthesizer
+
+    # Match the Mac's voice as closely as Windows allows. George and Hazel are the en-GB
+    # voices Microsoft ships; falling through to the default is fine, and better than
+    # failing, but a British voice is a much closer match to the rest of the room.
+    foreach ($wanted in @('George', 'Hazel', 'Ryan')) {
+        $found = $script:Speech.GetInstalledVoices() | Where-Object {
+            $_.Enabled -and $_.VoiceInfo.Name -like "*$wanted*"
+        } | Select-Object -First 1
+        if ($found) { $script:Speech.SelectVoice($found.VoiceInfo.Name); break }
+    }
+
+    # JARVIS is measured. Rate runs -10..10 with 0 as conversational.
+    $script:Speech.Rate = -2
 } catch {
     $script:Speech = $null
 }
@@ -237,7 +247,7 @@ function Invoke-CorePost($Path, $Fields) {
 
 function Send-Ack($CommandId, $Status, $Message) {
     Invoke-CorePost '/api/agent/ack' @{
-        node = $Node; session = $script:SessionId
+        device = $script:DeviceNumber; session = $script:SessionId
         cid = $CommandId; status = $Status; msg = $Message
     } | Out-Null
 }
@@ -450,7 +460,7 @@ function Start-Heartbeat($IntervalMs) {
     $script:HeartbeatRunspace = [RunspaceFactory]::CreateRunspace()
     $script:HeartbeatRunspace.Open()
     $script:HeartbeatRunspace.SessionStateProxy.SetVariable('Server', $Server)
-    $script:HeartbeatRunspace.SessionStateProxy.SetVariable('NodeId', $Node)
+    $script:HeartbeatRunspace.SessionStateProxy.SetVariable('DeviceNumber', $script:DeviceNumber)
     $script:HeartbeatRunspace.SessionStateProxy.SetVariable('SessionId', $script:SessionId)
     $script:HeartbeatRunspace.SessionStateProxy.SetVariable('IntervalMs', $IntervalMs)
     $script:HeartbeatRunspace.SessionStateProxy.SetVariable('Shared', $script:Shared)
@@ -470,7 +480,7 @@ function Start-Heartbeat($IntervalMs) {
             try {
                 $overlay = $Shared.Overlay
                 Invoke-RestMethod -Uri "$Server/api/agent/heartbeat" -Method Post -TimeoutSec 10 -Body @{
-                    node = $NodeId; session = $SessionId
+                    device = $DeviceNumber; session = $SessionId
                     state = $(if ($overlay -eq '1') { 'overlay' } else { 'ready' })
                     overlay = $overlay; awake = $awake; seq = $seq; rtt = $rtt
                 } | Out-Null
@@ -506,8 +516,9 @@ function Register-Node {
     $response = $null
     try {
         $response = Invoke-RestMethod -Uri "$Server/api/agent/register" -Method Post -TimeoutSec 10 -Body @{
-            node = $Node; token = $Token; os = 'windows'
-            host = $env:COMPUTERNAME; caps = $capabilities; agent = $AgentVersion
+            secret = $Secret; os = 'windows'; host = $Name
+            wall = $(if ($Wall) { '1' } else { '0' })
+            caps = $capabilities; agent = $AgentVersion
         }
     } catch {
         return 2
@@ -516,9 +527,10 @@ function Register-Node {
     $text = "$response".Trim()
     if ($text -like 'OK*') {
         $parts = $text -split '\s+'
-        $script:SessionId = $parts[1]
+        $script:DeviceNumber = $parts[1]
+        $script:SessionId = $parts[2]
         $script:HeartbeatMs = 5000
-        if ($parts.Count -ge 3) { [int]::TryParse($parts[2], [ref]$script:HeartbeatMs) | Out-Null }
+        if ($parts.Count -ge 4) { [int]::TryParse($parts[3], [ref]$script:HeartbeatMs) | Out-Null }
         return 0
     }
     if ($text -like 'REJECT*') {
@@ -531,7 +543,7 @@ function Register-Node {
 # Invoke-WebRequest buffers the whole response, which never completes for a stream that
 # stays open by design. HttpWebRequest gives the raw stream to read line by line.
 function Read-CommandStream {
-    $url = "$Server/api/agent/stream?node=$Node&session=$($script:SessionId)"
+    $url = "$Server/api/agent/stream?device=$($script:DeviceNumber)&session=$($script:SessionId)"
     $request = [System.Net.HttpWebRequest]::Create($url)
     $request.Method = 'GET'
     $request.Accept = 'text/event-stream'
@@ -562,15 +574,16 @@ function Show-Banner {
     Write-Host ''
     Write-Host '    JARVIS NODE AGENT' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host "    Node:          $Node"
-    Write-Host "    Core:          $Server"
-    Write-Host '    Authenticated: YES'
-    Write-Host "    Capabilities:  $(Get-Capabilities)"
-    if ($script:Browser) { Write-Host "    Overlay:       $($script:Browser)" }
-    else { Write-Host '    Overlay:       no Chromium-family browser found' -ForegroundColor Yellow }
-    Write-Host '    Status:        READY' -ForegroundColor Green
+    Write-Host "    You are device:  $($script:DeviceNumber)" -ForegroundColor Cyan
+    Write-Host "    Name:            $Name"
+    Write-Host "    Core:            $Server"
+    Write-Host "    Capabilities:    $(Get-Capabilities)"
+    if ($script:Browser) { Write-Host "    Overlay:         $($script:Browser)" }
+    else { Write-Host '    Overlay:         no Chromium-family browser found' -ForegroundColor Yellow }
+    Write-Host '    Status:          READY' -ForegroundColor Green
     Write-Host ''
-    Write-Host '    Running in the background. Ctrl+C ends remote control immediately.'
+    Write-Host '    Nothing will appear on your screen until the presenter takes the room.'
+    Write-Host '    Ctrl+C ends remote control immediately.'
     Write-Host ''
 }
 
@@ -578,7 +591,7 @@ function Show-Banner {
 # Main
 # ---------------------------------------------------------------------------------------
 
-Write-Log "connecting to $Server as $Node"
+Write-Log "joining $Server as \"$Name\""
 
 try {
     $backoff = 1
