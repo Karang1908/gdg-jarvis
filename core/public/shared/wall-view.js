@@ -70,8 +70,8 @@
    * case is the one that matters most — it is the failure no command can fix, so it gets
    * its own colour rather than passing as healthy.
    */
-  function cardFor(state, node) {
-    if (state.cards[node.id]) return state.cards[node.id];
+  function cardFor(state, device) {
+    if (state.cards[device.number]) return state.cards[device.number];
 
     var card = el('article', 'node-card');
 
@@ -79,8 +79,14 @@
     dotWrap.appendChild(el('span', 'dot'));
     card.appendChild(dotWrap);
 
-    card.appendChild(el('div', 'node-name', node.id));
-    card.appendChild(el('div', 'node-label', node.label || ''));
+    // The number is the headline, at the size a codename used to be. It is what the
+    // presenter says out loud, what the controller shows, and what the voice layer parses,
+    // so it has to be the thing you can read from the back of the room.
+    card.appendChild(el('div', 'node-name', device.number));
+
+    // Hostname and OS are how a person recognises their own laptop on the wall. Secondary
+    // to the number, but the reason nobody has to be told which device they are.
+    card.appendChild(el('div', 'node-label', device.hostname || ''));
 
     var meta = el('div', 'node-meta');
     meta.appendChild(el('span', 'node-os', ''));
@@ -90,43 +96,48 @@
     card.appendChild(el('div', 'node-scene', ''));
 
     state.graph.appendChild(card);
-    state.cards[node.id] = card;
+    state.cards[device.number] = card;
     return card;
   }
 
-  function paintCard(card, node, self) {
+  function paintCard(card, device, self) {
     var dot = card.querySelector('.dot');
     var status;
 
-    if (!node.online) {
+    if (!device.online) {
       status = 'offline';
       dot.className = 'dot';
-    } else if (!node.displayAwake) {
+    } else if (!device.displayAwake) {
       status = 'screen locked';
       dot.className = 'dot dark';
-    } else if (node.stale) {
+    } else if (device.stale) {
       status = 'not responding';
       dot.className = 'dot warn pulsing';
-    } else if (node.hasOverlay) {
-      status = node.scene;
+    } else if (device.hasOverlay) {
+      status = device.scene;
       dot.className = 'dot online';
     } else {
       status = 'ready';
       dot.className = 'dot online';
     }
 
-    card.classList.toggle('is-offline', !node.online);
-    card.classList.toggle('is-dark', Boolean(node.online && !node.displayAwake));
-    card.classList.toggle('is-self', node.id === self);
+    if (device.muted) status = status + ' · muted';
+
+    card.classList.toggle('is-offline', !device.online);
+    card.classList.toggle('is-dark', Boolean(device.online && !device.displayAwake));
+    card.classList.toggle('is-self', device.number === self);
+    card.classList.toggle('is-wall', Boolean(device.isWall));
 
     // Identify has to be unmistakable here too: the whole point of §21 is proving that one
     // named machine responded, and the wall is where the audience checks that claim.
-    card.classList.toggle('is-identifying', node.scene === 'identify');
+    card.classList.toggle('is-identifying', device.scene === 'identify');
 
-    card.querySelector('.node-label').textContent = node.label || '';
-    card.querySelector('.node-os').textContent = node.online ? node.os || '' : '';
+    card.querySelector('.node-label').textContent = device.hostname || '';
+    card.querySelector('.node-os').textContent = device.online ? device.os || '' : '';
     card.querySelector('.node-rtt').textContent =
-      node.online && node.rttMs !== null && node.rttMs !== undefined ? node.rttMs + ' ms' : '';
+      device.online && device.rttMs !== null && device.rttMs !== undefined
+        ? device.rttMs + ' ms'
+        : '';
     card.querySelector('.node-scene').textContent = status;
   }
 
@@ -148,29 +159,34 @@
       return;
     }
 
-    var order = snapshot.order || [];
-    var byId = {};
-    (snapshot.nodes || []).forEach(function (node) {
-      byId[node.id] = node;
+    var devices = snapshot.devices || [];
+
+    devices.forEach(function (device) {
+      paintCard(cardFor(state, device), device, self);
     });
 
-    order.forEach(function (id) {
-      var node = byId[id];
-      if (!node) return;
-      paintCard(cardFor(state, node), node, self);
+    // A device the operator dismissed should leave the wall, not linger as a ghost.
+    var present = {};
+    devices.forEach(function (device) {
+      present[device.number] = true;
     });
-
-    // A node removed from the config between restarts should not linger on the wall.
-    Object.keys(state.cards).forEach(function (id) {
-      if (order.indexOf(id) === -1) {
-        state.graph.removeChild(state.cards[id]);
-        delete state.cards[id];
+    Object.keys(state.cards).forEach(function (number) {
+      if (!present[number]) {
+        state.graph.removeChild(state.cards[number]);
+        delete state.cards[number];
       }
     });
 
-    var summary = snapshot.summary || { online: 0, configured: 0 };
-    state.count.textContent = summary.online + ' / ' + summary.configured + ' NODES ONLINE';
-    state.count.className = 'wall-count' + (summary.online < summary.configured ? ' partial' : '');
+    var summary = snapshot.summary || { online: 0, known: 0 };
+
+    // "4 DEVICES ONLINE" rather than "4 / 4": with dynamic enrollment there is no
+    // denominator — the room is however many people joined, and a count out of a total
+    // nobody declared would be inventing a number.
+    state.count.textContent =
+      summary.online === summary.known
+        ? summary.online + (summary.online === 1 ? ' DEVICE ONLINE' : ' DEVICES ONLINE')
+        : summary.online + ' OF ' + summary.known + ' ONLINE';
+    state.count.className = 'wall-count' + (summary.online < summary.known ? ' partial' : '');
   }
 
   /**
@@ -190,10 +206,10 @@
 
     state.activityList.appendChild(line);
 
-    // Ten lines is what fits inside the panel's height cap at projector scale. Keeping
-    // more would push the newest ones out of the clipped region — the panel would fill up
-    // and then appear to stop updating.
-    while (state.activityList.childNodes.length > 10) {
+    // Eight lines is what actually fits inside the panel's height cap at projector scale.
+    // Keeping more pushes the newest ones out of the clipped region, so the panel fills up
+    // and then appears to stop updating — measured on a 16:9 capture, not estimated.
+    while (state.activityList.childNodes.length > 8) {
       state.activityList.removeChild(state.activityList.firstChild);
     }
   }
