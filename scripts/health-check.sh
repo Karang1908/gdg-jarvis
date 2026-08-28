@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+#
+# Is the room ready?
+#
+#   scripts/health-check.sh                          # against localhost:3000
+#   scripts/health-check.sh http://10.42.0.1:3000    # against Core over JARVIS-NET
+#
+# Run this from the Presenter Mac twenty minutes before the talk, not from the Kali box.
+# Checking Core from the machine Core runs on proves nothing about the Wi-Fi, and the
+# Wi-Fi is what actually fails.
+#
+# Exit status is the number of problems, so it can gate a rehearsal script.
+
+set -uo pipefail
+
+CORE="${1:-http://127.0.0.1:3000}"
+CORE="${CORE%/}"
+ADMIN="${JARVIS_ADMIN_TOKEN:-}"
+
+problems=0
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; problems=$((problems + 1)); }
+
+printf '\n'
+bold "JARVIS health check — $CORE"
+printf '\n'
+
+# --- Reachability ----------------------------------------------------------------------
+
+bold "Core"
+
+health=$(curl -s --max-time 4 "$CORE/healthz" 2>/dev/null)
+if [ -n "$health" ]; then
+  ok "reachable — $health"
+else
+  bad "unreachable at $CORE"
+  printf '\n    Core is not answering. Check, in this order:\n'
+  printf '      1. is Core running?            node core/server.js --host <ap-ip>\n'
+  printf '      2. is this Mac on JARVIS-NET?  networksetup -getairportnetwork en0\n'
+  printf '      3. is the address right?       ip -4 addr show wlan0   (on Kali)\n\n'
+  exit $problems
+fi
+
+# --- Route separation — SPEC.md §29 ----------------------------------------------------
+#
+# The Presenter Mac is dual-homed: JARVIS-NET over Wi-Fi with no internet, and the internet
+# over an iPhone on USB. If the default route ever goes out over Wi-Fi, Antigravity loses
+# the internet; if the route to Core goes out over the phone, the whole demo stops. This is
+# the single most confusing failure in the setup, so it is checked explicitly.
+
+if command -v route >/dev/null 2>&1 && [ "$(uname)" = "Darwin" ]; then
+  bold ""
+  bold "Route separation"
+
+  core_host=$(printf '%s' "$CORE" | sed -E 's#^https?://##; s#[:/].*$##')
+  core_if=$(route -n get "$core_host" 2>/dev/null | awk '/interface:/{print $2}')
+  default_if=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+
+  if [ -n "$core_if" ]; then
+    ok "route to Core uses $core_if"
+  else
+    bad "no route to $core_host"
+  fi
+
+  if [ -n "$default_if" ]; then
+    if [ "$default_if" = "$core_if" ]; then
+      warn "default route also uses $core_if — internet and Core share one interface"
+      warn "fine for a local rehearsal; connect the iPhone before the live demo"
+    else
+      ok "default route uses $default_if — separate from Core"
+    fi
+  fi
+fi
+
+# --- The room ---------------------------------------------------------------------------
+
+if [ -z "$ADMIN" ]; then
+  # Read it from the registry when running out of a checkout, so the common case needs no
+  # environment variable.
+  if [ -f "$(dirname "${BASH_SOURCE[0]}")/../core/config/nodes.json" ] && command -v node >/dev/null 2>&1; then
+    ADMIN=$(node -e "
+      process.stdout.write(require('$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/core/config/nodes.json').admin.token)
+    " 2>/dev/null)
+  fi
+fi
+
+if [ -z "$ADMIN" ]; then
+  bold ""
+  warn "no admin token; skipping the node checks"
+  warn "set JARVIS_ADMIN_TOKEN or run this from the repository"
+  printf '\n'
+  exit $problems
+fi
+
+bold ""
+bold "Nodes"
+
+nodes=$(curl -s --max-time 4 -H "Authorization: Bearer $ADMIN" "$CORE/api/nodes" 2>/dev/null)
+
+if [ -z "$nodes" ]; then
+  bad "could not read the registry"
+elif printf '%s' "$nodes" | grep -q '"error":"unauthorized"'; then
+  bad "admin token rejected"
+else
+  printf '%s' "$nodes" | node -e "
+    let raw = '';
+    process.stdin.on('data', (c) => (raw += c)).on('end', () => {
+      const room = JSON.parse(raw);
+      let issues = 0;
+
+      for (const node of room.nodes) {
+        const pad = node.id.padEnd(7);
+        if (!node.online) {
+          console.log('  \x1b[31m✗\x1b[0m ' + pad + 'offline');
+          issues++;
+        } else if (!node.displayAwake) {
+          // The failure no command can fix, so it is called out separately from a
+          // healthy node rather than folded into 'online'.
+          console.log('  \x1b[33m!\x1b[0m ' + pad + 'online but the screen is LOCKED — unlock it now');
+          issues++;
+        } else if (node.stale) {
+          console.log('  \x1b[33m!\x1b[0m ' + pad + 'connected but not heartbeating');
+          issues++;
+        } else {
+          const caps = node.capabilities.length;
+          const takeover = node.capabilities.includes('takeover');
+          console.log(
+            '  \x1b[32m✓\x1b[0m ' + pad + (node.os || '?').padEnd(8) +
+            String(node.rttMs ?? '?').padStart(4) + ' ms   ' + caps + ' caps' +
+            (takeover ? '' : '   \x1b[33m(no browser: cannot be taken over)\x1b[0m')
+          );
+          if (!takeover) issues++;
+        }
+      }
+
+      console.log('');
+      console.log('  ' + room.summary.online + ' / ' + room.summary.configured + ' online');
+      process.exit(issues);
+    });
+  "
+  node_issues=$?
+  [ "$node_issues" -gt 0 ] && problems=$((problems + node_issues))
+fi
+
+# --- Failure-safe path -------------------------------------------------------------------
+#
+# The one control that must work. Checked last and checked for real, because a release that
+# only works in theory is the difference between a recoverable demo and an unrecoverable one.
+
+bold ""
+bold "Emergency release"
+
+release=$(curl -s --max-time 4 -X POST -H "Authorization: Bearer $ADMIN" \
+  -H 'Content-Type: application/json' -d '{"target":"ALL"}' "$CORE/api/release" 2>/dev/null)
+
+if printf '%s' "$release" | grep -q '"dispatched"'; then
+  ok "release(ALL) accepted"
+else
+  bad "release(ALL) did not respond correctly: ${release:-no response}"
+fi
+
+printf '\n'
+if [ "$problems" -eq 0 ]; then
+  printf '  \033[32m\033[1mroom ready\033[0m\n\n'
+else
+  printf '  \033[33m\033[1m%s issue(s) — see above\033[0m\n\n' "$problems"
+fi
+
+exit $problems
