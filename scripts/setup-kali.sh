@@ -2,9 +2,9 @@
 #
 # Bring up JARVIS-NET and JARVIS Core on the Kali laptop.
 #
-#   sudo scripts/setup-kali.sh                 # check, generate tokens, create the hotspot
-#   scripts/setup-kali.sh --tokens-only        # regenerate the registry, touch nothing else
-#   scripts/setup-kali.sh --check              # report readiness, change nothing
+#   sudo scripts/setup-kali.sh                  # check, generate secrets, create the hotspot
+#   scripts/setup-kali.sh --secrets-only        # regenerate secrets, touch nothing else
+#   scripts/setup-kali.sh --check               # report readiness, change nothing
 #
 # Implements SPEC.md §4. Every step is checked before it is taken, because the one thing
 # this script must never do is half-configure the network an hour before a talk and leave
@@ -13,20 +13,17 @@
 set -uo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-CONFIG="$REPO_ROOT/core/config/nodes.json"
+CONFIG="$REPO_ROOT/core/config/core.json"
 
-SSID="JARVIS-NET"
-CONNECTION="JARVIS-NET"
-PASSPHRASE="${JARVIS_WIFI_PASSPHRASE:-ArcReactor42!}"
-NODES="MAIN ALPHA BETA GAMMA"
+SSID="${JARVIS_SSID:-JARVIS-NET}"
+CONNECTION="$SSID"
+PASSPHRASE="${JARVIS_WIFI_PASSPHRASE:-gdg@essentials2026}"
 
 MODE="full"
 case "${1:-}" in
-  --tokens-only) MODE="tokens" ;;
+  --secrets-only|--tokens-only) MODE="secrets" ;;
   --check) MODE="check" ;;
-  --help|-h)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
-    exit 0 ;;
+  --help|-h) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -72,13 +69,22 @@ if [ -n "$WIFI_IF" ]; then
   if iw list 2>/dev/null | grep -A 15 "Supported interface modes" | grep -qw "AP"; then
     ok "adapter supports AP mode"
   else
-    fail "adapter does not report AP mode — this card cannot host JARVIS-NET"
+    fail "adapter does not report AP mode — this card cannot host $SSID"
     warn "use a different adapter, or a phone hotspot with Core joined as a client"
     problems=$((problems + 1))
   fi
 else
   fail "no wifi interface found"
   problems=$((problems + 1))
+fi
+
+# WPA2 requires 8 characters. Checked here rather than at nmcli, whose failure for a short
+# passphrase is not obviously about the passphrase.
+if [ "${#PASSPHRASE}" -lt 8 ]; then
+  fail "wifi passphrase must be at least 8 characters (WPA2 minimum)"
+  problems=$((problems + 1))
+else
+  ok "wifi passphrase is ${#PASSPHRASE} characters"
 fi
 
 if [ "$MODE" = "check" ]; then
@@ -94,14 +100,13 @@ if [ "$problems" -gt 0 ] && [ "$MODE" = "full" ]; then
 fi
 
 # ---------------------------------------------------------------------------------------
-# Token registry
+# Secrets
 # ---------------------------------------------------------------------------------------
 
 bold ""
-bold "Node registry"
+bold "Secrets"
 
-generate_token() {
-  # openssl is on every Kali; /dev/urandom is the fallback that needs nothing at all.
+generate() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
   else
@@ -109,43 +114,34 @@ generate_token() {
   fi
 }
 
-if [ -f "$CONFIG" ] && [ "$MODE" != "tokens" ]; then
-  warn "$CONFIG already exists; keeping the tokens already in it"
-  warn "run with --tokens-only to replace them"
+if [ -f "$CONFIG" ] && [ "$MODE" != "secrets" ]; then
+  warn "$(basename "$CONFIG") already exists; keeping the secrets already in it"
+  warn "run with --secrets-only to replace them"
 else
-  # Never overwrite a registry without leaving the old one recoverable: teammates may
-  # already be holding the tokens it contains.
+  # Never overwrite without leaving the old one recoverable: teammates may already be
+  # holding a join script carrying the secret it contains.
   if [ -f "$CONFIG" ]; then
     backup="$CONFIG.$(date +%Y%m%d-%H%M%S).bak"
     cp "$CONFIG" "$backup"
-    warn "previous registry saved to $(basename "$backup")"
+    warn "previous config saved to $(basename "$backup")"
   fi
 
-  {
-    printf '{\n'
-    printf '  "admin": { "token": "%s" },\n' "$(generate_token)"
-    printf '  "nodes": {\n'
-    first=1
-    for node in $NODES; do
-      [ $first -eq 1 ] || printf ',\n'
-      first=0
-      if [ "$node" = "MAIN" ]; then
-        printf '    "MAIN": { "token": "%s", "label": "Presenter Mac", "role": "wall" }' "$(generate_token)"
-      else
-        label=$(printf '%s' "$node" | cut -c1)$(printf '%s' "$node" | cut -c2- | tr '[:upper:]' '[:lower:]')
-        printf '    "%s": { "token": "%s", "label": "%s" }' "$node" "$(generate_token)" "$label"
-      fi
-    done
-    printf '\n  }\n}\n'
-  } > "$CONFIG"
+  cat > "$CONFIG" <<JSON
+{
+  "admin": { "token": "$(generate)" },
+  "join":  { "secret": "$(generate)" },
+  "wifi":  { "ssid": "$SSID", "passphrase": "$PASSPHRASE" }
+}
+JSON
 
   chmod 600 "$CONFIG"
-  ok "wrote $CONFIG (mode 600)"
+  ok "wrote $(basename "$CONFIG") (mode 600)"
 fi
 
-if [ "$MODE" = "tokens" ]; then
+if [ "$MODE" = "secrets" ]; then
   bold ""
-  ok "registry regenerated; restart Core to pick it up"
+  ok "secrets regenerated; restart Core to pick them up"
+  warn "every teammate must re-run the join line — the old secret no longer works"
   exit 0
 fi
 
@@ -164,6 +160,10 @@ if [ "$(id -u)" -ne 0 ]; then
 else
   if nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$CONNECTION"; then
     ok "connection '$CONNECTION' already exists"
+    # The passphrase may have changed since it was created; make the live network match
+    # the one this script is about to print on screen.
+    nmcli connection modify "$CONNECTION" wifi-sec.psk "$PASSPHRASE" >/dev/null 2>&1 \
+      && ok "passphrase updated to match this config"
   else
     if nmcli device wifi hotspot ifname "$WIFI_IF" con-name "$CONNECTION" \
          ssid "$SSID" band bg password "$PASSPHRASE" >/dev/null 2>&1; then
@@ -174,12 +174,16 @@ else
     fi
   fi
 
-  # SPEC.md §4 asks for this. It is not actually required by the architecture — every path
-  # is client to Core, never client to client — but leaving isolation on would silently
-  # break anything added later that expects peers to see each other.
+  # SPEC.md §4 asks for this. It is not required by the architecture — every path is client
+  # to Core, never client to client — but leaving isolation on would silently break
+  # anything added later that expects peers to see each other.
   nmcli connection modify "$CONNECTION" 802-11-wireless.ap-isolation no >/dev/null 2>&1 \
     && ok "client isolation disabled" \
     || warn "could not set ap-isolation (older NetworkManager); harmless for this demo"
+
+  # Survive a reboot on the day without anyone remembering to bring it back up.
+  nmcli connection modify "$CONNECTION" connection.autoconnect yes >/dev/null 2>&1 \
+    && ok "will come back automatically after a reboot"
 
   # 2.4 GHz on purpose. 5 GHz AP mode on Linux runs into DFS channels and regulatory
   # domains, and the traffic here is a few kilobytes of JSON per second.
@@ -204,19 +208,22 @@ bold "Start Core"
 printf '\n    node core/server.js --host %s --port 3000\n' "$CORE_IP"
 
 bold ""
-bold "Give each teammate their line"
+bold "Tell everyone"
 printf '\n'
-for node in $NODES; do
-  token=$(node -e "process.stdout.write(require('$CONFIG').nodes['$node'].token)" 2>/dev/null)
-  printf '  %-6s macOS    curl -s http://%s:3000/join | bash -s %s %s\n' "$node" "$CORE_IP" "$node" "$token"
-  printf '  %-6s Windows  $env:JARVIS_NODE="%s"; $env:JARVIS_TOKEN="%s"; iwr http://%s:3000/join.ps1 -UseBasicParsing | iex\n\n' \
-    "" "$node" "$token" "$CORE_IP"
-done
+printf '  1. Join Wi-Fi   \033[1m%s\033[0m   password  \033[1m%s\033[0m\n' "$SSID" "$PASSPHRASE"
+printf '\n'
+printf '  2. Run one line. The same line for everybody — no name, no token.\n'
+printf '\n'
+printf '     macOS     curl -s http://%s:3000/join | bash\n' "$CORE_IP"
+printf '     Windows   iwr http://%s:3000/join.ps1 -UseBasicParsing | iex\n' "$CORE_IP"
+printf '\n'
+printf '  3. Leave it running. It prints the device number they were given.\n'
 
+bold ""
 bold "Operator"
 printf '\n    wall     http://%s:3000/wall/\n' "$CORE_IP"
 printf '    control  http://%s:3000/control/\n' "$CORE_IP"
-printf '    admin    %s\n\n' "${ADMIN_TOKEN:-see core/config/nodes.json}"
+printf '    admin    \033[1m%s\033[0m\n\n' "${ADMIN_TOKEN:-see core/config/core.json}"
 
-warn "these tokens are the keys to every enrolled laptop — hand them over in person"
+warn "the admin token is the key to every enrolled laptop — it is yours, not the room's"
 printf '\n'
