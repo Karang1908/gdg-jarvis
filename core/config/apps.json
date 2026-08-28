@@ -1,0 +1,39 @@
+{
+  "_comment": "Application allowlist, per SPEC.md §13. Logical names only. Core rejects anything not listed here before dispatch, and each agent independently re-checks against its own copy of this mapping. Neither Core nor the LLM can ever hand a node an executable path or a shell string.",
+
+  "chrome": {
+    "label": "Google Chrome",
+    "macos": "Google Chrome",
+    "windows": "chrome.exe"
+  },
+  "edge": {
+    "label": "Microsoft Edge",
+    "macos": "Microsoft Edge",
+    "windows": "msedge.exe"
+  },
+  "vscode": {
+    "label": "Visual Studio Code",
+    "macos": "Visual Studio Code",
+    "windows": "Code.exe"
+  },
+  "spotify": {
+    "label": "Spotify",
+    "macos": "Spotify",
+    "windows": "Spotify.exe"
+  },
+  "terminal": {
+    "label": "Terminal",
+    "macos": "Terminal",
+    "windows": "wt.exe"
+  },
+  "calculator": {
+    "label": "Calculator",
+    "macos": "Calculator",
+    "windows": "calc.exe"
+  },
+  "notes": {
+    "label": "Notes",
+    "macos": "Notes",
+    "windows": "notepad.exe"
+  }
+}
