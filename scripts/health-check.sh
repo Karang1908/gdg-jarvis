@@ -160,6 +160,39 @@ fi
 # The one control that must work. Checked last and checked for real, because a release that
 # only works in theory is the difference between a recoverable demo and an unrecoverable one.
 
+# --- Voice and personality --------------------------------------------------------------
+
+bold ""
+bold "JARVIS"
+
+voice=$(curl -s --max-time 4 -H "Authorization: Bearer $ADMIN" "$CORE/api/voice" 2>/dev/null)
+if [ -n "$voice" ]; then
+  printf '%s' "$voice" | node -e "
+    let raw = '';
+    process.stdin.on('data', (c) => (raw += c)).on('end', () => {
+      const v = JSON.parse(raw);
+
+      if (v.available) {
+        console.log('  \x1b[32m✓\x1b[0m voice: ' + v.backend + (v.voice ? ' / ' + v.voice : '') +
+                    (v.enabled ? '' : '  \x1b[33m(muted)\x1b[0m'));
+      } else {
+        // Not fatal, but the demo is much flatter without it and the fix is one apt line.
+        console.log('  \x1b[33m!\x1b[0m no speech backend here — JARVIS will be silent');
+        console.log('       sudo apt install speech-dispatcher espeak-ng');
+      }
+
+      const p = v.personality || {};
+      if (p.loaded) {
+        console.log('  \x1b[32m✓\x1b[0m personality: ' + p.name + ', ' + p.words + ' words');
+      } else {
+        console.log('  \x1b[33m!\x1b[0m no personality file — the model will use its client default');
+      }
+    });
+  "
+else
+  warn "could not read /api/voice"
+fi
+
 bold ""
 bold "Emergency release"
 

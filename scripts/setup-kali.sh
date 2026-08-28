@@ -78,6 +78,21 @@ else
   problems=$((problems + 1))
 fi
 
+# The brain runs here now: Core, the MCP server, and the AI client all live on this
+# machine (DEVIATIONS.md D11). Wi-Fi is busy being the access point, so the LLM needs a
+# second route out — ethernet, or a phone tethered over USB. Without one, everything except
+# the AI layer still works, which is worth saying plainly rather than discovering on stage.
+UPLINK=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+if [ -n "$UPLINK" ] && [ "$UPLINK" != "$WIFI_IF" ]; then
+  ok "internet uplink: $UPLINK (separate from the access point)"
+elif [ -n "$UPLINK" ]; then
+  warn "the only default route is $UPLINK, which is about to become the access point"
+  warn "plug in ethernet or tether a phone, or the LLM layer will have no internet"
+else
+  warn "no internet route — the local demo works fully, the AI layer will not"
+  warn "plug in ethernet or tether a phone over USB"
+fi
+
 # WPA2 requires 8 characters. Checked here rather than at nmcli, whose failure for a short
 # passphrase is not obviously about the passphrase.
 if [ "${#PASSPHRASE}" -lt 8 ]; then
@@ -218,6 +233,17 @@ printf '     macOS     curl -s http://%s:3000/join | bash\n' "$CORE_IP"
 printf '     Windows   iwr http://%s:3000/join.ps1 -UseBasicParsing | iex\n' "$CORE_IP"
 printf '\n'
 printf '  3. Leave it running. It prints the device number they were given.\n'
+
+bold ""
+bold "The AI layer"
+printf '\n'
+printf '  Core, the MCP server, and Antigravity all run here.\n'
+printf '\n'
+printf '    python3 -m venv .venv && .venv/bin/pip install -r mcp/requirements.txt\n'
+printf '    scripts/install-mcp.sh\n'
+printf '\n'
+printf '  That registers the tools and installs the personality from\n'
+printf '  core/config/personality.md. Edit that file to change who JARVIS is.\n'
 
 bold ""
 bold "Operator"
