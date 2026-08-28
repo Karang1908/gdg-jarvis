@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 #
-# Synthetic JARVIS node.
+# Synthetic JARVIS device.
 #
-# Registers, holds the command channel, heartbeats, and acknowledges everything — but
-# never launches a browser or touches the operating system. It exists so the whole room
-# can be exercised on one machine.
+# Enrolls, holds the command channel, heartbeats, and acknowledges everything — but never
+# launches a browser or touches the operating system. It exists so the whole room can be
+# exercised on one machine.
 #
-#   scripts/sim-node.sh BETA <token> [server]
-#   scripts/sim-node.sh BETA <token> --os windows
+#   scripts/sim-node.sh "Ravi-PC" --os windows
+#   scripts/sim-node.sh "anita-mbp"
+#   scripts/sim-node.sh "lab-3" --server http://10.42.0.1:3000 --secret <secret>
+#
+# The name is what appears on the wall; Core assigns the number. With no --secret it reads
+# one from core/config/core.json, so on the Core machine it needs no arguments beyond a
+# name.
 #
 # Two things this is genuinely for:
 #
 #   Rehearsing Core, the Command Wall, and the controller without borrowing four laptops.
-#   A simulated GAMMA proves the wall renders four nodes and that a broadcast reaches all
-#   of them long before anyone carries hardware to a venue.
+#   Six simulated devices prove the wall still composes at six, which is the sort of thing
+#   nobody discovers until the sixth person joins.
 #
 #   Testing the Windows path from a Mac. Pass --os windows and Core resolves app names
 #   against the Windows column of the allowlist, so a mistake in apps.json surfaces here
@@ -25,26 +30,42 @@
 
 set -uo pipefail
 
-NODE_ID="${1:-}"
-NODE_TOKEN="${2:-}"
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+DEVICE_NAME="${1:-}"
 CORE_URL="http://127.0.0.1:3000"
 NODE_OS="macos"
+JOIN_SECRET="${JARVIS_JOIN_SECRET:-}"
+WANTS_WALL=0
 
-shift 2 2>/dev/null || true
+shift 2>/dev/null || true
 while [ $# -gt 0 ]; do
   case "$1" in
     --os) NODE_OS="${2:-macos}"; shift 2 ;;
+    --secret) JOIN_SECRET="${2:-}"; shift 2 ;;
+    --server) CORE_URL="${2:-}"; shift 2 ;;
+    --wall) WANTS_WALL=1; shift ;;
     http://*|https://*) CORE_URL="$1"; shift ;;
     *) shift ;;
   esac
 done
 
-if [ -z "$NODE_ID" ] || [ -z "$NODE_TOKEN" ]; then
-  echo "usage: scripts/sim-node.sh <NODE> <TOKEN> [server] [--os macos|windows]" >&2
+if [ -z "$DEVICE_NAME" ]; then
+  echo "usage: scripts/sim-node.sh <name> [--os macos|windows|linux] [--server URL] [--secret S] [--wall]" >&2
   exit 2
 fi
 
-NODE_ID=$(printf '%s' "$NODE_ID" | tr '[:lower:]' '[:upper:]')
+# Running on the Core machine is the common case, so read the secret rather than making
+# the operator paste it into every simulated device.
+if [ -z "$JOIN_SECRET" ] && [ -f "$REPO_ROOT/core/config/core.json" ]; then
+  JOIN_SECRET=$(node -e "process.stdout.write(require('$REPO_ROOT/core/config/core.json').join.secret)" 2>/dev/null)
+fi
+
+if [ -z "$JOIN_SECRET" ]; then
+  echo "no join secret; pass --secret or run from the machine holding core/config/core.json" >&2
+  exit 2
+fi
+
 CORE_URL="${CORE_URL%/}"
 
 # The full set, so Core never skips a command for a missing capability while rehearsing.
@@ -72,23 +93,25 @@ cleanup() {
   [ -n "$STREAM_PID" ] && kill "$STREAM_PID" 2>/dev/null
   [ -n "${HEARTBEAT_PID:-}" ] && kill "$HEARTBEAT_PID" 2>/dev/null
   rm -rf "$STATE" 2>/dev/null
-  echo "sim $NODE_ID stopped" >&2
+  echo "sim \"$DEVICE_NAME\" stopped" >&2
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
 REG=$(post /api/agent/register \
-  "node=$NODE_ID" "token=$NODE_TOKEN" "os=$NODE_OS" \
-  "host=sim-$(printf '%s' "$NODE_ID" | tr '[:upper:]' '[:lower:]')" \
-  "caps=$CAPS" "agent=sim-1.0.0")
+  "secret=$JOIN_SECRET" "os=$NODE_OS" "host=$DEVICE_NAME" \
+  "wall=$WANTS_WALL" "caps=$CAPS" "agent=sim-1.0.0")
 
 case "$REG" in
-  OK*) SESSION=$(printf '%s' "$REG" | awk '{print $2}') ;;
-  *) echo "sim $NODE_ID: $REG" >&2; exit 1 ;;
+  OK*)
+    DEVICE_NUMBER=$(printf '%s' "$REG" | awk '{print $2}')
+    SESSION=$(printf '%s' "$REG" | awk '{print $3}')
+    ;;
+  *) echo "sim \"$DEVICE_NAME\": $REG" >&2; exit 1 ;;
 esac
 
 printf '%s' "$SESSION" > "$STATE/session"
-echo "sim $NODE_ID registered as $NODE_OS ($CORE_URL)" >&2
+echo "sim \"$DEVICE_NAME\" is device $DEVICE_NUMBER ($NODE_OS)" >&2
 
 # Heartbeat. Always reports the display as awake — a simulated node has no screen to lock,
 # and claiming otherwise would put a false warning on the wall.
@@ -98,7 +121,7 @@ echo "sim $NODE_ID registered as $NODE_OS ($CORE_URL)" >&2
     overlay=0
     [ -f "$STATE/overlay" ] && overlay=1
     post /api/agent/heartbeat \
-      "node=$NODE_ID" "session=$SESSION" \
+      "device=$DEVICE_NUMBER" "session=$SESSION" \
       "state=$([ "$overlay" = 1 ] && printf 'overlay' || printf 'ready')" \
       "overlay=$overlay" "awake=1" "seq=$seq" "rtt=4" >/dev/null
     seq=$((seq + 1))
@@ -108,7 +131,7 @@ echo "sim $NODE_ID registered as $NODE_OS ($CORE_URL)" >&2
 HEARTBEAT_PID=$!
 
 mkfifo "$STREAM_FIFO" 2>/dev/null
-curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION" \
+curl -sN --no-buffer "$CORE_URL/api/agent/stream?device=$DEVICE_NUMBER&session=$SESSION" \
   > "$STREAM_FIFO" 2>/dev/null &
 STREAM_PID=$!
 
@@ -129,9 +152,9 @@ while IFS= read -r line; do
       release) rm -f "$STATE/overlay" ;;
     esac
 
-    echo "  $NODE_ID <- $action" >&2
+    echo "  device $DEVICE_NUMBER <- $action" >&2
     post /api/agent/ack \
-      "node=$NODE_ID" "session=$SESSION" "cid=$cid" "status=success" "msg=simulated" >/dev/null
+      "device=$DEVICE_NUMBER" "session=$SESSION" "cid=$cid" "status=success" "msg=simulated" >/dev/null
 done < "$STREAM_FIFO"
 
 kill "$STREAM_PID" 2>/dev/null
