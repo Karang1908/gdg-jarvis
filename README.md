@@ -126,27 +126,46 @@ scripts/health-check.sh http://10.42.0.1:3000
 Run it **from the presenter's Mac**, not from Kali. Checking Core from the machine Core
 runs on proves nothing about the Wi-Fi, and the Wi-Fi is what fails.
 
-### 4. Optional — the AI layer
+### 4. The AI layer — also on Kali
+
+Core, the MCP server, the `agy` CLI, and JARVIS's voice all run on the Kali machine. Run
+this **there**:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r mcp/requirements.txt
-
-JARVIS_CORE_URL=http://10.42.0.1:3000 \
-JARVIS_ADMIN_TOKEN=<admin token> \
-.venv/bin/python mcp/server.py
+scripts/install-mcp.sh
 ```
 
-For Antigravity specifically, this does the whole thing:
+That registers the tools in `~/.gemini/config/mcp_config.json` — the config Antigravity 2.x
+shares across the IDE, the `agy` CLI, and the SDK — keeping any other MCP servers you
+already have, and installs the personality as a custom agent. Restart Antigravity, then ask
+it *"how many devices are online?"*.
+
+Kali needs internet for the model. Its Wi-Fi is busy being the access point, so use
+**ethernet or a phone tethered over USB**. `scripts/setup-kali.sh` tells you whether a
+separate uplink exists. Without one everything except the AI layer still works.
+
+JARVIS speaks from Kali, so its audio output is the room's voice — feed it to the PA if
+there is one:
 
 ```bash
-scripts/install-mcp.sh --server http://10.42.0.1:3000
+sudo apt install speech-dispatcher espeak-ng      # if it is not already there
 ```
 
-It merges into `~/.gemini/config/mcp_config.json` — the config Antigravity 2.x shares
-across the IDE, the `agy` CLI, and the SDK — keeping any other MCP servers you already
-have. Restart Antigravity, then ask it "how many devices are online?".
+### 5. Who JARVIS is
 
-The suggested system prompt is in [SPEC.md §30](docs/SPEC.md).
+`core/config/personality.md` is the system prompt. Plain markdown — edit it and JARVIS
+changes.
+
+```bash
+$EDITOR core/config/personality.md
+curl -X POST -H "Authorization: Bearer <admin token>" \
+  http://127.0.0.1:3000/api/personality/reload
+```
+
+One file, three consumers: Core serves it, the MCP server takes it as its `instructions`
+(which is what a client hands the model), and `scripts/install-mcp.sh` copies it to
+Antigravity's custom-agent location. Nothing else holds a copy that can disagree.
 
 **Do not build the demo on this.** The first cinematic moment is triggered by hand from
 `/control/`; the LLM is a second interface to a system that already works without it.
@@ -176,21 +195,35 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
 ## How it works
 
 ```
-      VOICE  →  LLM  →  MCP  ─── HTTP ──┐
-                                        ▼
-   CONTROLLER  ──────────── HTTP ──→  JARVIS CORE  ── Kali, 10.42.0.1
-                                        │
-                                        │  SSE, one stream per node
-                            ┌───────────┼───────────┐
-                            ▼           ▼           ▼
-                         device 1    device 2    device 3
-                         (agent)     (agent)     (agent)
-                            │           │           │
-                            ▼           ▼           ▼
-                       fullscreen overlay, dedicated browser profile
+   KALI  ── ethernet / tethered phone ──→ internet (the model)
+   │
+   │   agy CLI ──→ MCP ──┐
+   │                     │ localhost
+   │   JARVIS's voice ───┤
+   │                     ▼
+   │                JARVIS CORE ──── 10.42.0.1
+   │                     │
+   └── Wi-Fi AP          │  SSE, one stream per device
+       JARVIS-NET  ┌─────┼─────┐
+                   ▼     ▼     ▼
+              device 1  dev 2  dev 3      ← numbered in join order
+               (agent) (agent) (agent)
+                   │     │     │
+                   ▼     ▼     ▼
+          fullscreen overlay, dedicated browser profile
+
+   CONTROLLER (any phone on JARVIS-NET) ──── HTTP ──→ Core
 ```
 
+Everything that thinks lives on Kali. The presenter's Mac is an ordinary device that
+happens to drive the projector — no dual-homing, no MCP, nothing to get wrong while
+talking.
+
 Four things are worth knowing about the design.
+
+**One voice, one brain.** Core, the model, and the speech all run on Kali. JARVIS can talk
+before a single device has joined, and it does not move around the room depending on what
+was last targeted.
 
 **Joining the Wi-Fi grants nothing.** A machine is controllable only once someone runs the
 agent, which enrolls with a join secret. Every command channel is authenticated and a
