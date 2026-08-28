@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>JARVIS</title>
+
+    <!--
+      The fullscreen surface a takeover puts over a teammate's desktop.
+
+      Everything it needs is served from Core on the local network. No external request is
+      made from this page at all: JARVIS-NET has no internet, and a blocking third-party
+      fetch would leave a black rectangle over someone's laptop until it timed out.
+    -->
+    <link rel="stylesheet" href="/shared/jarvis.css" />
+    <link rel="stylesheet" href="/shared/scenes.css" />
+    <link rel="stylesheet" href="/overlay/overlay.css" />
+  </head>
+
+  <body>
+    <div class="atmosphere"></div>
+
+    <!-- Scenes render here. -->
+    <main class="scene-root" id="scene"></main>
+
+    <!-- Persistent corner readouts. Deliberately quiet: they are for the operator glancing
+         across the room, not for the audience. -->
+    <div class="hud hud-tl">
+      <span class="label" id="hud-node">—</span>
+    </div>
+    <div class="hud hud-tr">
+      <span class="dot" id="hud-dot"></span>
+      <span class="label" id="hud-link">LINKING</span>
+    </div>
+
+    <!--
+      The escape hatch (DEVIATIONS.md D4).
+
+      Whoever is sitting in front of this screen must always be able to get their desktop
+      back without finding the presenter. Shown only while the gesture is in progress, so
+      it never appears to the audience during the demo.
+    -->
+    <div class="escape" id="escape" hidden>
+      <div class="escape-text">RELEASING</div>
+      <div class="escape-bar"><div class="escape-fill" id="escape-fill"></div></div>
+    </div>
+
+    <div class="scanlines"></div>
+
+    <script src="/shared/stream.js"></script>
+    <script src="/shared/scenes.js"></script>
+    <script src="/shared/wall-view.js"></script>
+    <script src="/overlay/overlay.js"></script>
+  </body>
+</html>
