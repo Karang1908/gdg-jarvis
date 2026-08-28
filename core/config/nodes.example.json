@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to nodes.json and replace every token before running. nodes.json is gitignored so real tokens never reach the repository. Per SPEC.md §8, a client is never trusted merely for knowing a node ID.",
+
+  "_admin": "Used by the controller UI and the MCP server. This is the key to the room.",
+  "admin": {
+    "token": "CHANGE-ME-admin-token"
+  },
+
+  "nodes": {
+    "MAIN": {
+      "token": "CHANGE-ME-main-token",
+      "label": "Presenter Mac",
+      "role": "wall",
+      "_role": "'wall' makes this node's overlay settle into the Command Wall after the takeover animation, per DEVIATIONS.md D5."
+    },
+    "ALPHA": {
+      "token": "CHANGE-ME-alpha-token",
+      "label": "Alpha"
+    },
+    "BETA": {
+      "token": "CHANGE-ME-beta-token",
+      "label": "Beta"
+    },
+    "GAMMA": {
+      "token": "CHANGE-ME-gamma-token",
+      "label": "Gamma"
+    }
+  }
+}
