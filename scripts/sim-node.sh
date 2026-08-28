@@ -51,7 +51,12 @@ CORE_URL="${CORE_URL%/}"
 CAPS="takeover,release,identify,open_url,open_app,speak,set_volume"
 
 STATE=$(mktemp -d "${TMPDIR:-/tmp}/jarvis-sim.XXXXXX") || exit 1
-HAS_OVERLAY=0
+
+# Read through a FIFO for the same reason the real agent does: bash defers a trap until
+# the foreground command finishes, and an SSE stream never finishes, so a piped read would
+# leave this hanging on SIGTERM.
+STREAM_FIFO="$STATE/stream"
+STREAM_PID=""
 
 decode() { printf '%b' "${1//%/\\x}"; }
 
@@ -64,6 +69,8 @@ post() {
 
 cleanup() {
   rm -f "$STATE/session"
+  [ -n "$STREAM_PID" ] && kill "$STREAM_PID" 2>/dev/null
+  [ -n "${HEARTBEAT_PID:-}" ] && kill "$HEARTBEAT_PID" 2>/dev/null
   rm -rf "$STATE" 2>/dev/null
   echo "sim $NODE_ID stopped" >&2
 }
@@ -100,8 +107,12 @@ echo "sim $NODE_ID registered as $NODE_OS ($CORE_URL)" >&2
 ) &
 HEARTBEAT_PID=$!
 
-curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION" 2>/dev/null |
-  while IFS= read -r line; do
+mkfifo "$STREAM_FIFO" 2>/dev/null
+curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION" \
+  > "$STREAM_FIFO" 2>/dev/null &
+STREAM_PID=$!
+
+while IFS= read -r line; do
     case "$line" in
       'data: '*) ;;
       *) continue ;;
@@ -121,7 +132,8 @@ curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION"
     echo "  $NODE_ID <- $action" >&2
     post /api/agent/ack \
       "node=$NODE_ID" "session=$SESSION" "cid=$cid" "status=success" "msg=simulated" >/dev/null
-  done
+done < "$STREAM_FIFO"
 
+kill "$STREAM_PID" 2>/dev/null
 rm -f "$STATE/session"
 kill "$HEARTBEAT_PID" 2>/dev/null
