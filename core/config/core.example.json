@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to core.json and replace both secrets before running. core.json is gitignored so real secrets never reach the repository. scripts/setup-kali.sh --secrets-only generates one for you.",
+
+  "_admin": "The key to the room. The controller and the MCP server hold it. Never handed to a teammate.",
+  "admin": {
+    "token": "CHANGE-ME-admin-token"
+  },
+
+  "_join": "Baked into the script Core serves at /join. Any device that presents it enrolls and is assigned the next free number. A leaked join secret only lets someone put JARVIS on their own screen; controlling other machines still needs the admin token.",
+  "join": {
+    "secret": "CHANGE-ME-join-secret"
+  },
+
+  "_wifi": "Recorded so the setup script and the operator agree on one passphrase. Core never uses these to authenticate anything.",
+  "wifi": {
+    "ssid": "JARVIS-NET",
+    "passphrase": "gdg@essentials2026"
+  }
+}
