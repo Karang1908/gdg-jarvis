@@ -283,7 +283,7 @@ function overlayUrl(nodeId, auth, initialScene = null) {
   const { ticket } = auth.issueTicket('overlay', nodeId);
   const node = registry.get(nodeId);
   const url = new URL('/overlay/', coreOrigin);
-  url.searchParams.set('node', nodeId);
+  url.searchParams.set('device', nodeId);
   url.searchParams.set('ticket', ticket);
   if (registry.isWall(nodeId)) url.searchParams.set('wall', '1');
 
