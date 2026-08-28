@@ -64,8 +64,8 @@ cd gdg-jarvis
 sudo scripts/setup-kali.sh
 ```
 
-That checks the Wi-Fi adapter really supports AP mode, generates a token registry, brings
-up `JARVIS-NET`, and prints the exact join line for every teammate.
+That checks the Wi-Fi adapter really supports AP mode, generates the two secrets, brings up
+`JARVIS-NET` with the passphrase `gdg@essentials2026`, and prints the join line.
 
 There is nothing to install. Core runs on the Node standard library alone — no
 `npm install`, which matters because during the demo this machine's Wi-Fi *is* the access
@@ -77,22 +77,26 @@ node core/server.js --host 10.42.0.1 --port 3000
 
 Ctrl+C releases the room before exiting.
 
-### 2. Teammates — one line each
+### 2. Teammates — one line, the same for everybody
 
-Join `JARVIS-NET`, then paste the line the setup script printed.
+Join `JARVIS-NET` (password `gdg@essentials2026`), then paste one line. No device name, no
+token — Core bakes its own address and the join secret into the script when it serves it.
 
 **macOS**
 
 ```bash
-curl -s http://10.42.0.1:3000/join | bash -s ALPHA <token>
+curl -s http://10.42.0.1:3000/join | bash
 ```
 
 **Windows**
 
 ```powershell
-$env:JARVIS_NODE="BETA"; $env:JARVIS_TOKEN="<token>"
 iwr http://10.42.0.1:3000/join.ps1 -UseBasicParsing | iex
 ```
+
+It prints the device number it was given — `You are device: 3` — and that number is how the
+presenter refers to it. There is no limit on how many people join, and nobody has to edit a
+config file to add one.
 
 Nothing is installed and nothing appears on screen. They keep using the laptop normally.
 Ctrl+C ends remote control immediately.
@@ -105,6 +109,13 @@ piped from `curl` is not. See [D1](docs/DEVIATIONS.md#d1--zero-dependency-agents
 
 Open `http://10.42.0.1:3000/wall/` fullscreen on the display, and
 `http://10.42.0.1:3000/control/` on a phone. Both ask once for the admin token.
+
+The controller carries two toggles that are easy to confuse, so they are worded apart:
+
+| | |
+| --- | --- |
+| **MIC** | Your microphone. Off by default. On, it listens for commands — "take the room", "identify two", "release the room" — matched locally in the browser, with no LLM in the path. |
+| **JARVIS AUDIBLE** | JARVIS's voice. Mutes speech without affecting anything else. |
 
 Then, before you trust any of it:
 
@@ -125,8 +136,17 @@ JARVIS_ADMIN_TOKEN=<admin token> \
 .venv/bin/python mcp/server.py
 ```
 
-Point Antigravity, Claude, or any MCP client at it. The suggested system prompt is in
-[SPEC.md §30](docs/SPEC.md).
+For Antigravity specifically, this does the whole thing:
+
+```bash
+scripts/install-mcp.sh --server http://10.42.0.1:3000
+```
+
+It merges into `~/.gemini/config/mcp_config.json` — the config Antigravity 2.x shares
+across the IDE, the `agy` CLI, and the SDK — keeping any other MCP servers you already
+have. Restart Antigravity, then ask it "how many devices are online?".
+
+The suggested system prompt is in [SPEC.md §30](docs/SPEC.md).
 
 **Do not build the demo on this.** The first cinematic moment is triggered by hand from
 `/control/`; the LLM is a second interface to a system that already works without it.
@@ -136,14 +156,17 @@ Point Antigravity, Claude, or any MCP client at it. The suggested system prompt 
 ## Rehearsing without four laptops
 
 ```bash
-scripts/sim-node.sh ALPHA <token> http://127.0.0.1:3000
-scripts/sim-node.sh BETA  <token> http://127.0.0.1:3000 --os windows
+scripts/sim-node.sh "Ravi-PC" --os windows
+scripts/sim-node.sh "anita-mbp"
+scripts/sim-node.sh "lab-thinkpad" --os linux
 ```
 
-Synthetic nodes register, heartbeat, and acknowledge, so the wall, the controller, and the
-whole command path can be exercised on one machine. `--os windows` makes Core resolve
-application names against the Windows column of the allowlist, so a mistake in `apps.json`
-surfaces at your desk rather than on stage.
+Synthetic devices enroll, heartbeat, and acknowledge, so the wall, the controller, and the
+whole command path can be exercised on one machine. Six of them is worth running at least
+once: nobody discovers the wall stops composing until the sixth person joins.
+
+`--os windows` makes Core resolve application names against the Windows column of the
+allowlist, so a mistake in `apps.json` surfaces at your desk rather than on stage.
 
 They cannot prove that a takeover renders or that release restores a desktop. Only real
 hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need it.
@@ -160,7 +183,7 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
                                         │  SSE, one stream per node
                             ┌───────────┼───────────┐
                             ▼           ▼           ▼
-                          ALPHA       BETA        GAMMA
+                         device 1    device 2    device 3
                          (agent)     (agent)     (agent)
                             │           │           │
                             ▼           ▼           ▼
@@ -170,8 +193,10 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
 Four things are worth knowing about the design.
 
 **Joining the Wi-Fi grants nothing.** A machine is controllable only once someone runs the
-agent with that node's token. Every command channel is authenticated, and a rejected
-client never receives a command.
+agent, which enrolls with a join secret. Every command channel is authenticated and a
+rejected client never receives a command. The admin token — the one that commands *other
+people's* machines — is separate, is never handed out, and Core refuses to start if the two
+are ever the same value.
 
 **The LLM cannot reach a shell.** Not by policy — structurally. No action in the protocol
 carries a command line. Applications are referenced by logical name against an allowlist,
