@@ -15,6 +15,7 @@
  * looking at a black screen.
  */
 
+const fsp = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -126,9 +127,15 @@ commands.setCoreOrigin(origin);
 
 const observers = new bus.Channel('observers');
 
+/** Overlays on a node whose role is 'wall'; they receive state as well as scenes. */
+const wallOverlays = new Set();
+
 function pushState() {
-  if (observers.size === 0) return;
-  observers.broadcast('state', registry.snapshot());
+  if (observers.size === 0 && wallOverlays.size === 0) return;
+
+  const snapshot = registry.snapshot();
+  observers.broadcast('state', snapshot);
+  for (const connection of wallOverlays) connection.sendJson('state', snapshot);
 }
 
 registry.onChange(pushState);
@@ -260,7 +267,26 @@ router.get('/api/overlay/stream', (req, res, context) => {
     role: node ? node.role : 'node',
     scene: node ? node.scene : 'normal',
     order: registry.ids(),
+
+    // Tickets are single use, so the one that authorised this connection is now spent. An
+    // overlay holds no admin token and could not mint another, which would make any
+    // dropped stream permanent. Hand it the next one now: each reconnect spends one
+    // ticket and receives its replacement.
+    renew: auth.issueTicket('overlay', nodeId).ticket,
   });
+
+  // The wall is a node whose overlay shows the room rather than a scene (DEVIATIONS.md
+  // D5), so it needs the state feed the observers get. Subscribing here rather than
+  // giving MAIN an observer ticket keeps the overlay's authority scoped to one screen.
+  if (node && node.role === 'wall') {
+    wallOverlays.add(connection);
+    connection.sendJson('state', registry.snapshot());
+    const previousOnClose = connection.onClose;
+    connection.onClose = (closed) => {
+      wallOverlays.delete(connection);
+      if (previousOnClose) previousOnClose(closed);
+    };
+  }
 });
 
 // --- Observer channel --------------------------------------------------------------
@@ -384,13 +410,30 @@ router.post('/api/speak', async (req, res, context) => {
  * piped from curl is never quarantined, so Gatekeeper and SmartScreen never appear. See
  * DEVIATIONS.md D1.
  */
-router.get('/join', (req, res) => {
-  serveStatic(res, AGENT_DIR, '/jarvis-agent.sh');
-});
+/**
+ * Serve an agent with Core's own address baked in.
+ *
+ * A script arriving down a pipe has no idea where it came from, and a teammate should not
+ * have to type an IP address they cannot see. Substituting here means the pasted line
+ * carries only the two things that are actually theirs — node and token.
+ */
+function serveAgent(res, filename) {
+  let source;
+  try {
+    source = fsp.readFileSync(path.join(AGENT_DIR, filename), 'utf8');
+  } catch {
+    return text(res, 404, 'agent not found');
+  }
 
-router.get('/join.ps1', (req, res) => {
-  serveStatic(res, AGENT_DIR, '/jarvis-agent.ps1');
-});
+  res.writeHead(200, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(source.split('@@CORE_URL@@').join(origin));
+}
+
+router.get('/join', (req, res) => serveAgent(res, 'jarvis-agent.sh'));
+router.get('/join.ps1', (req, res) => serveAgent(res, 'jarvis-agent.ps1'));
 
 // --- Static UI -------------------------------------------------------------------------
 
@@ -441,7 +484,8 @@ server.listen(options.port, options.host, () => {
   console.log(`    control     ${origin}/control/`);
   console.log('');
   console.log('    teammates run:');
-  console.log(`      curl -s ${origin}/join | sh -s <NODE> <TOKEN>`);
+  console.log(`      macOS    curl -s ${origin}/join | bash -s <NODE> <TOKEN>`);
+  console.log(`      Windows  iwr ${origin}/join.ps1 -UseBasicParsing | iex`);
   console.log('');
 
   if (options.host === '0.0.0.0') {
