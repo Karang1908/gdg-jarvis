@@ -531,7 +531,7 @@ router.get('/', (req, res) => {
 
 router.get('/healthz', (req, res) => {
   const snapshot = registry.snapshot();
-  text(res, 200, `ok nodes=${snapshot.summary.online}/${snapshot.summary.configured}`);
+  text(res, 200, `ok devices=${snapshot.summary.online}/${snapshot.summary.known}`);
 });
 
 router.otherwise((req, res, context) => {
