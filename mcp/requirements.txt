@@ -6,4 +6,4 @@
 #
 # Install this days before the demo. The Presenter Mac reaches the internet only through a
 # tethered iPhone, and pip over cellular in a venue is not a thing to plan around.
-mcp>=1.2.0
+mcp>=2.1.0

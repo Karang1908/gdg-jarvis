@@ -28,13 +28,15 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 CORE_URL = os.environ.get("JARVIS_CORE_URL", "http://10.42.0.1:3000").rstrip("/")
 ADMIN_TOKEN = os.environ.get("JARVIS_ADMIN_TOKEN", "")
 TIMEOUT_SECONDS = 8
 
-mcp = FastMCP("jarvis-room")
+# MCP SDK 2.x. FastMCP was renamed to MCPServer in 2.0; requirements.txt pins >=2 so this
+# stays in step with the SDK an AI client will actually have installed.
+mcp = MCPServer("jarvis-room")
 
 
 # ---------------------------------------------------------------------------------------
