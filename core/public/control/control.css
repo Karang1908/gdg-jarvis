@@ -1,0 +1,350 @@
+/*
+ * Controller.
+ *
+ * Designed for a phone held in one hand, in a dark room, by someone who is also talking to
+ * an audience. That single sentence decides everything below.
+ *
+ *   Targets are large. Nothing interactive is under 48px tall, because a mis-tap during
+ *   the demo is not a small cost.
+ *   Contrast is high but the page is dark. A white interface held at chest height lights
+ *   up the presenter's face on stage.
+ *   RELEASE ALL is fixed, always visible, and the only red thing on the page.
+ */
+
+.control-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-text-size-adjust: 100%;
+}
+
+.console {
+  position: relative;
+  z-index: 20;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 1.2rem 1rem 7.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.console-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: env(safe-area-inset-top);
+}
+
+.console-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6ch;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Node strip
+ *
+ * Status display and target selector in one. Two controls that always agree beat two that
+ * can disagree — selecting a node you can see is offline is a mistake the interface should
+ * not let you make silently.
+ * ----------------------------------------------------------------------------------- */
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 0.5rem;
+}
+
+.node-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.7rem 0.4rem;
+  min-height: 68px;
+  border: 1px solid var(--cyan-ghost);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.node-chip[aria-pressed='true'] {
+  border-color: var(--cyan);
+  background: rgba(79, 216, 255, 0.14);
+}
+
+.node-chip.offline {
+  opacity: 0.4;
+}
+
+.node-chip .node-id {
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  color: var(--cyan-bright);
+}
+
+.node-chip .node-sub {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+.target-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+}
+
+.target-value {
+  font-size: 18px;
+  letter-spacing: 0.24em;
+  color: var(--cyan);
+  font-weight: 400;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Buttons
+ * ----------------------------------------------------------------------------------- */
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.btn {
+  min-height: 56px;
+  padding: 0.9rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--cyan-dim);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 90ms ease;
+}
+
+.btn:active {
+  transform: scale(0.975);
+  background: rgba(79, 216, 255, 0.2);
+}
+
+/* The one action the whole demo turns on. Given the full width and the brightest
+   treatment on the page, because it is triggered once, on cue, in the dark. */
+.btn-primary {
+  grid-column: 1 / -1;
+  min-height: 76px;
+  font-size: 16px;
+  letter-spacing: 0.3em;
+  color: var(--void);
+  background: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+.btn-primary:active {
+  background: var(--cyan-bright);
+}
+
+.btn-small {
+  min-height: 48px;
+  padding: 0.6rem 1rem;
+  font-size: 11px;
+  flex: none;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip {
+  min-height: 44px;
+  padding: 0.6rem 0.9rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-dim);
+  background: rgba(10, 34, 54, 0.4);
+  border: 1px solid var(--cyan-ghost);
+  cursor: pointer;
+}
+
+.chip:active {
+  color: var(--void);
+  background: var(--cyan);
+}
+
+/* Scenes that change the room's mood rather than its content get a warning tint, so a
+   thumb aiming for 'reactor' does not land on 'red alert' unremarked. */
+.chip.hot {
+  border-color: var(--alert-dim);
+  color: var(--alert);
+}
+
+.chip.hot:active {
+  background: var(--alert);
+  color: #fff;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Text entry
+ * ----------------------------------------------------------------------------------- */
+
+.inline-form {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.text-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.6rem 0.8rem;
+  font-family: var(--mono);
+  /* 16px exactly: anything smaller makes iOS Safari zoom the page on focus, and a
+     controller that reflows when the presenter taps a field is a controller that loses
+     the RELEASE button off-screen. */
+  font-size: 16px;
+  color: var(--ink);
+  background: rgba(0, 8, 16, 0.8);
+  border: 1px solid var(--cyan-dim);
+  outline: none;
+}
+
+.text-input:focus {
+  border-color: var(--cyan);
+}
+
+/* --------------------------------------------------------------------------------------
+ * Feedback
+ *
+ * Every dispatch reports what actually happened, including which nodes were skipped and
+ * why. A partial success that looks total is the failure mode this line exists to prevent.
+ * ----------------------------------------------------------------------------------- */
+
+.feedback {
+  min-height: 2.4em;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  line-height: 1.7;
+  color: var(--ink-faint);
+  word-break: break-word;
+}
+
+.feedback.ok {
+  color: var(--good);
+}
+
+.feedback.warn {
+  color: var(--amber);
+}
+
+.feedback.bad {
+  color: var(--alert);
+}
+
+/* --------------------------------------------------------------------------------------
+ * Release
+ * ----------------------------------------------------------------------------------- */
+
+.release-all {
+  position: fixed;
+  z-index: 80;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 72px;
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  font-family: var(--mono);
+  font-size: 17px;
+  letter-spacing: 0.34em;
+  color: #fff;
+  background: var(--alert);
+  border: none;
+  border-top: 2px solid #fff2;
+  cursor: pointer;
+}
+
+.release-all:active {
+  background: #ff5566;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Gate
+ * ----------------------------------------------------------------------------------- */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: min(94vw, 400px);
+  text-align: center;
+}
+
+.gate-title {
+  font-size: 28px;
+  color: var(--cyan-bright);
+  text-shadow: var(--glow-cyan);
+}
+
+.gate-label {
+  font-size: 11px;
+  letter-spacing: var(--trace);
+  color: var(--cyan-dim);
+  text-align: left;
+}
+
+.gate-input {
+  font-family: var(--mono);
+  font-size: 16px;
+  letter-spacing: 0.18em;
+  padding: 0.9rem 1rem;
+  color: var(--ink);
+  background: rgba(0, 8, 16, 0.8);
+  border: 1px solid var(--cyan-dim);
+  outline: none;
+}
+
+.gate-input:focus {
+  border-color: var(--cyan);
+}
+
+.gate-button {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: var(--trace);
+  min-height: 56px;
+  color: var(--void);
+  background: var(--cyan);
+  border: none;
+  cursor: pointer;
+}
+
+.gate-error {
+  font-size: 12px;
+  letter-spacing: var(--trace);
+  color: var(--alert);
+}
