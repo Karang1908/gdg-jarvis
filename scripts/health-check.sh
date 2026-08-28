@@ -80,9 +80,9 @@ fi
 if [ -z "$ADMIN" ]; then
   # Read it from the registry when running out of a checkout, so the common case needs no
   # environment variable.
-  if [ -f "$(dirname "${BASH_SOURCE[0]}")/../core/config/nodes.json" ] && command -v node >/dev/null 2>&1; then
+  if [ -f "$(dirname "${BASH_SOURCE[0]}")/../core/config/core.json" ] && command -v node >/dev/null 2>&1; then
     ADMIN=$(node -e "
-      process.stdout.write(require('$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/core/config/nodes.json').admin.token)
+      process.stdout.write(require('$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/core/config/core.json').admin.token)
     " 2>/dev/null)
   fi
 fi
@@ -96,12 +96,12 @@ if [ -z "$ADMIN" ]; then
 fi
 
 bold ""
-bold "Nodes"
+bold "Devices"
 
-nodes=$(curl -s --max-time 4 -H "Authorization: Bearer $ADMIN" "$CORE/api/nodes" 2>/dev/null)
+nodes=$(curl -s --max-time 4 -H "Authorization: Bearer $ADMIN" "$CORE/api/devices" 2>/dev/null)
 
 if [ -z "$nodes" ]; then
-  bad "could not read the registry"
+  bad "could not read the device list"
 elif printf '%s' "$nodes" | grep -q '"error":"unauthorized"'; then
   bad "admin token rejected"
 else
@@ -111,25 +111,34 @@ else
       const room = JSON.parse(raw);
       let issues = 0;
 
-      for (const node of room.nodes) {
-        const pad = node.id.padEnd(7);
-        if (!node.online) {
-          console.log('  \x1b[31m✗\x1b[0m ' + pad + 'offline');
+      if (!room.devices || room.devices.length === 0) {
+        console.log('  \x1b[33m!\x1b[0m nobody has joined yet');
+        console.log('');
+        console.log('  Each person runs:  curl -s ' + process.argv[1] + '/join | bash');
+        process.exit(1);
+      }
+
+      for (const device of room.devices) {
+        const label = (String(device.number) + '  ' + (device.hostname || '')).padEnd(24);
+
+        if (!device.online) {
+          console.log('  \x1b[31m✗\x1b[0m ' + label + 'offline');
           issues++;
-        } else if (!node.displayAwake) {
-          // The failure no command can fix, so it is called out separately from a
-          // healthy node rather than folded into 'online'.
-          console.log('  \x1b[33m!\x1b[0m ' + pad + 'online but the screen is LOCKED — unlock it now');
+        } else if (!device.displayAwake) {
+          // The failure no command can fix, so it is called out separately from a healthy
+          // device rather than folded into 'online'.
+          console.log('  \x1b[33m!\x1b[0m ' + label + 'online but the screen is LOCKED — unlock it now');
           issues++;
-        } else if (node.stale) {
-          console.log('  \x1b[33m!\x1b[0m ' + pad + 'connected but not heartbeating');
+        } else if (device.stale) {
+          console.log('  \x1b[33m!\x1b[0m ' + label + 'connected but not heartbeating');
           issues++;
         } else {
-          const caps = node.capabilities.length;
-          const takeover = node.capabilities.includes('takeover');
+          const takeover = device.capabilities.includes('takeover');
           console.log(
-            '  \x1b[32m✓\x1b[0m ' + pad + (node.os || '?').padEnd(8) +
-            String(node.rttMs ?? '?').padStart(4) + ' ms   ' + caps + ' caps' +
+            '  \x1b[32m✓\x1b[0m ' + label + (device.os || '?').padEnd(8) +
+            String(device.rttMs ?? '?').padStart(4) + ' ms   ' + device.capabilities.length + ' caps' +
+            (device.isWall ? '   [wall]' : '') +
+            (device.muted ? '   [muted]' : '') +
             (takeover ? '' : '   \x1b[33m(no browser: cannot be taken over)\x1b[0m')
           );
           if (!takeover) issues++;
@@ -137,10 +146,11 @@ else
       }
 
       console.log('');
-      console.log('  ' + room.summary.online + ' / ' + room.summary.configured + ' online');
+      console.log('  ' + room.summary.online + ' of ' + room.summary.known + ' online' +
+                  (room.wall ? ', wall is device ' + room.wall : ', no wall assigned'));
       process.exit(issues);
     });
-  "
+  " "$CORE"
   node_issues=$?
   [ "$node_issues" -gt 0 ] && problems=$((problems + node_issues))
 fi
