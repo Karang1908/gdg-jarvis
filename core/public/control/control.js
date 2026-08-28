@@ -96,6 +96,9 @@
       return report(verb + ' REFUSED: ' + data.error, 'bad');
     }
 
+    // JARVIS speaking in its own voice reports what it said, not a dispatch.
+    if (data.spoken) return report('JARVIS: “' + data.spoken + '”', data.ok ? 'ok' : 'warn');
+
     // Some endpoints (mute, wall, forget) report differently. Treat a bare ok as success.
     if (!data.dispatched && data.ok) return report(verb + ' → ok', 'ok');
 
@@ -287,7 +290,9 @@
     PHRASES.forEach(function (text) {
       phrases.appendChild(
         chip(text, function () {
-          send('/api/speak', { target: target, text: text }, 'SPEAK');
+          // JARVIS's own voice, from Core — not whichever device happens to be selected.
+          // The target selector governs what is *done to* a device; speech is JARVIS.
+          send('/api/speak', { text: text }, 'SPEAK');
         })
       );
     });
@@ -345,7 +350,7 @@
       event.preventDefault();
       var input = document.getElementById('speak-input');
       if (!input.value.trim()) return;
-      send('/api/speak', { target: target, text: input.value.trim() }, 'SPEAK');
+      send('/api/speak', { text: input.value.trim() }, 'SPEAK');
       input.value = '';
     });
 
@@ -394,7 +399,7 @@
         return send(path, body, verb);
       },
       speak: function (text) {
-        return send('/api/speak', { target: 'ALL', text: text }, 'SPEAK');
+        return send('/api/speak', { text: text }, 'SPEAK');
       },
       target: function () {
         return target;
