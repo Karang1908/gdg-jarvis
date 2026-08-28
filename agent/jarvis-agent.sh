@@ -2,11 +2,15 @@
 #
 # JARVIS Node Agent — macOS
 #
-# Runs on a teammate's Mac and does exactly three things: authenticate to Core, hold a
-# command channel open, and execute the small set of actions it advertises. Nothing
-# appears over the user's desktop until Core says so, and Ctrl+C takes it all away.
+# Runs on a teammate's Mac and does exactly three things: enroll with Core, hold a command
+# channel open, and execute the small set of actions it advertises. Nothing appears over
+# the user's desktop until Core says so, and Ctrl+C takes it all away.
 #
-#   curl -s http://10.42.0.1:3000/join | bash -s ALPHA <TOKEN>
+#   curl -s http://10.42.0.1:3000/join | bash
+#
+# That is the whole thing. No device name to remember and no token to type — Core bakes
+# its own address and the join secret into the script when it serves it, and assigns this
+# machine a number on arrival. The number is printed on enrollment.
 #
 # Written in bash rather than Python because /bin/bash is on every Mac and Python is not,
 # and because a script piped from curl is never quarantined — no Gatekeeper prompt on
@@ -26,59 +30,66 @@ case "$CORE_DEFAULT" in
   @@*) CORE_DEFAULT="http://10.42.0.1:3000" ;;
 esac
 
+# Substituted by Core when this script is served from /join.
+JOIN_SECRET_DEFAULT="@@JOIN_SECRET@@"
+case "$JOIN_SECRET_DEFAULT" in
+  @@*) JOIN_SECRET_DEFAULT="" ;;
+esac
+
 # ---------------------------------------------------------------------------------------
 # Arguments
+#
+# There are none in the normal case. The flags exist for running out of a checkout, and
+# for the presenter's machine, which passes --wall to claim the Command Wall.
 # ---------------------------------------------------------------------------------------
 
-NODE_ID=""
-NODE_TOKEN="${JARVIS_TOKEN:-}"
 CORE_URL="$CORE_DEFAULT"
+JOIN_SECRET="${JARVIS_JOIN_SECRET:-$JOIN_SECRET_DEFAULT}"
+WANTS_WALL=0
+DEVICE_NAME=""
 
 usage() {
   cat >&2 <<USAGE
 JARVIS Node Agent ${AGENT_VERSION}
 
-  curl -s http://10.42.0.1:3000/join | bash -s <NODE> <TOKEN>
-  ./jarvis-agent.sh --node ALPHA --token <TOKEN> --server http://10.42.0.1:3000
+  curl -s http://10.42.0.1:3000/join | bash
 
-  <NODE>    node ID assigned to this machine (ALPHA, BETA, GAMMA, MAIN)
-  <TOKEN>   that node's token; JARVIS_TOKEN in the environment also works
+  --server URL    Core address, when running from a checkout
+  --secret S      join secret, when running from a checkout
+  --name NAME     override the name shown on the wall (defaults to this Mac's name)
+  --wall          this machine shows the Command Wall
 
 Leave it running. Ctrl+C ends remote control immediately.
 USAGE
   exit 2
 }
 
-# Two calling conventions: bare positional for the pasted one-liner, and the long flags
-# SPEC.md §35 documents. Both reach the same place.
 while [ $# -gt 0 ]; do
   case "$1" in
-    --node)   NODE_ID="${2:-}"; shift 2 ;;
-    --token)  NODE_TOKEN="${2:-}"; shift 2 ;;
     --server) CORE_URL="${2:-}"; shift 2 ;;
+    --secret) JOIN_SECRET="${2:-}"; shift 2 ;;
+    --name)   DEVICE_NAME="${2:-}"; shift 2 ;;
+    --wall)   WANTS_WALL=1; shift ;;
     --help|-h) usage ;;
-    -*) echo "unknown option: $1" >&2; usage ;;
-    *)
-      if [ -z "$NODE_ID" ]; then NODE_ID="$1"
-      elif [ -z "$NODE_TOKEN" ]; then NODE_TOKEN="$1"
-      else CORE_URL="$1"
-      fi
-      shift ;;
+    *) shift ;;
   esac
 done
 
-[ -n "$NODE_ID" ] || usage
-NODE_ID=$(printf '%s' "$NODE_ID" | tr '[:lower:]' '[:upper:]')
-
-# Prompt rather than fail when a human is present and forgot the token. When piped from
-# curl there is no terminal, so this is skipped and the usage message does the work.
-if [ -z "$NODE_TOKEN" ] && [ -t 0 ]; then
-  printf 'Token for %s: ' "$NODE_ID" >&2
-  read -r NODE_TOKEN
+if [ -z "$JOIN_SECRET" ] && [ -t 0 ]; then
+  printf 'Join secret: ' >&2
+  read -r JOIN_SECRET
 fi
-[ -n "$NODE_TOKEN" ] || usage
+
+if [ -z "$JOIN_SECRET" ]; then
+  echo "No join secret. Use the line Core printed, or pass --secret." >&2
+  exit 2
+fi
 
 CORE_URL="${CORE_URL%/}"
+
+# The name a human will read off the wall. ComputerName is the friendly one a Mac owner
+# actually set ("Karan's Laptop"); hostname is the network name and is often uglier.
+[ -n "$DEVICE_NAME" ] || DEVICE_NAME=$(scutil --get ComputerName 2>/dev/null || hostname)
 
 # ---------------------------------------------------------------------------------------
 # State
@@ -92,6 +103,7 @@ OVERLAY_PID_FILE="$STATE_DIR/overlay.pid"
 # cannot touch the tabs the user had open. SPEC.md §16 calls this critical, and it is.
 OVERLAY_PROFILE="$STATE_DIR/overlay-profile"
 
+DEVICE_NUMBER=""
 SESSION_ID=""
 HEARTBEAT_MS=5000
 CAFFEINATE_PID=""
@@ -214,7 +226,7 @@ post_timed() {
 
 ack() {
   post /api/agent/ack \
-    "node=$NODE_ID" "session=$SESSION_ID" "cid=$1" "status=$2" "msg=${3:-}" >/dev/null
+    "device=$DEVICE_NUMBER" "session=$SESSION_ID" "cid=$1" "status=$2" "msg=${3:-}" >/dev/null
 }
 
 # ---------------------------------------------------------------------------------------
@@ -330,16 +342,43 @@ do_open_url() {
   fi
 }
 
+# The JARVIS voice.
+#
+# Daniel is the only serious British male voice macOS ships, and it is the closest thing
+# available offline. The tuning matters as much as the voice: JARVIS is measured and low,
+# so the rate is pulled below conversational and the pitch dropped a little. `[[pbas n]]`
+# is a Speech Synthesis command embedded in the text, not a shell construct.
+JARVIS_VOICE="${JARVIS_VOICE:-Daniel}"
+JARVIS_RATE="${JARVIS_RATE:-165}"
+JARVIS_PITCH="${JARVIS_PITCH:-38}"
+
+# `say -v Nonexistent` does not fail — it silently falls back to the system voice, so a
+# typo would go unnoticed until the demo sounded wrong. Check the installed list instead.
+voice_installed() {
+  say -v '?' 2>/dev/null | grep -q "^$1 "
+}
+
+if ! voice_installed "$JARVIS_VOICE"; then
+  say_log "voice '$JARVIS_VOICE' is not installed; using the system default"
+  JARVIS_VOICE=""
+fi
+
 do_speak() {
   local text="$1" voice="$2" cid="$3"
 
-  # The voice name reaches `say` as a flag value, so it is checked against a character set
-  # that cannot become one. The text itself is a single quoted argument and never touches
-  # a shell.
-  if [ -n "$voice" ] && printf '%s' "$voice" | grep -q '^[A-Za-z ]\{1,32\}$'; then
-    say -v "$voice" "$text" >/dev/null 2>&1
+  # A voice named by Core overrides the default, but only if it exists here. The name
+  # reaches `say` as a flag value, so it is also checked against a character set that
+  # cannot become one.
+  local chosen="$JARVIS_VOICE"
+  if [ -n "$voice" ] && printf '%s' "$voice" | grep -q '^[A-Za-z ()]\{1,32\}$'; then
+    if voice_installed "$voice"; then chosen="$voice"; fi
+  fi
+
+  # The text is a single quoted argument and never touches a shell.
+  if [ -n "$chosen" ]; then
+    say -v "$chosen" -r "$JARVIS_RATE" "[[pbas $JARVIS_PITCH]]$text" >/dev/null 2>&1
   else
-    say "$text" >/dev/null 2>&1
+    say -r "$JARVIS_RATE" "$text" >/dev/null 2>&1
   fi
   ack "$cid" success "spoken"
 }
@@ -466,7 +505,7 @@ heartbeat_loop() {
 
     local measured
     measured=$(post_timed /api/agent/heartbeat \
-      "node=$NODE_ID" "session=$SESSION_ID" \
+      "device=$DEVICE_NUMBER" "session=$SESSION_ID" \
       "state=$([ "$overlay_flag" = 1 ] && printf 'overlay' || printf 'ready')" \
       "overlay=$overlay_flag" "awake=$(display_awake)" \
       "seq=$seq" "rtt=$rtt")
@@ -489,19 +528,19 @@ heartbeat_loop() {
 register() {
   local response
   response=$(post /api/agent/register \
-    "node=$NODE_ID" "token=$NODE_TOKEN" "os=macos" \
-    "host=$(scutil --get ComputerName 2>/dev/null || hostname)" \
-    "caps=$CAPABILITIES" "agent=$AGENT_VERSION")
+    "secret=$JOIN_SECRET" "os=macos" "host=$DEVICE_NAME" \
+    "wall=$WANTS_WALL" "caps=$CAPABILITIES" "agent=$AGENT_VERSION")
 
   case "$response" in
     OK*)
-      SESSION_ID=$(printf '%s' "$response" | awk '{print $2}')
-      HEARTBEAT_MS=$(printf '%s' "$response" | awk '{print $3}')
+      DEVICE_NUMBER=$(printf '%s' "$response" | awk '{print $2}')
+      SESSION_ID=$(printf '%s' "$response" | awk '{print $3}')
+      HEARTBEAT_MS=$(printf '%s' "$response" | awk '{print $4}')
       [ -n "$HEARTBEAT_MS" ] || HEARTBEAT_MS=5000
       return 0
       ;;
     REJECT*)
-      say_log "Core refused this node: $(printf '%s' "$response" | awk '{print $2}')"
+      say_log "Core refused this device: $(printf '%s' "$response" | awk '{print $2}')"
       return 1
       ;;
     '')
@@ -519,14 +558,15 @@ banner() {
 
     JARVIS NODE AGENT
 
-    Node:          $NODE_ID
-    Core:          $CORE_URL
-    Authenticated: YES
-    Capabilities:  ${CAPABILITIES:-none}
-    Overlay:       ${BROWSER:-no chromium-family browser found}
-    Status:        READY
+    You are device:  $DEVICE_NUMBER
+    Name:            $DEVICE_NAME
+    Core:            $CORE_URL
+    Capabilities:    ${CAPABILITIES:-none}
+    Overlay:         ${BROWSER:-no chromium-family browser found}
+    Status:          READY
 
-    Running in the background. Ctrl+C ends remote control immediately.
+    Nothing will appear on your screen until the presenter takes the room.
+    Ctrl+C ends remote control immediately.
 
 BANNER
 }
@@ -567,7 +607,7 @@ trap 'cleanup; exit 143' TERM HUP
 
 start_wake_lock
 
-say_log "connecting to $CORE_URL as $NODE_ID"
+say_log "joining $CORE_URL as \"$DEVICE_NAME\""
 
 backoff=1
 while [ "$RUNNING" = "1" ]; do
@@ -589,7 +629,7 @@ while [ "$RUNNING" = "1" ]; do
     rm -f "$STREAM_FIFO"
     mkfifo "$STREAM_FIFO" 2>/dev/null
 
-    curl -sN --no-buffer "$CORE_URL/api/agent/stream?node=$NODE_ID&session=$SESSION_ID" \
+    curl -sN --no-buffer "$CORE_URL/api/agent/stream?device=$DEVICE_NUMBER&session=$SESSION_ID" \
       > "$STREAM_FIFO" 2>/dev/null &
     STREAM_PID=$!
 
