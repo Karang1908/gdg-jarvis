@@ -8,9 +8,9 @@
 
     <!--
       SPEC.md §19 and §39. This page is the guaranteed path: it works with no LLM, no
-      voice recognition, and no internet, and the first cinematic moment of the demo is
-      triggered from here rather than from anything that could fail to understand a
-      sentence.
+      internet, and — apart from the microphone — no cloud service of any kind. The first
+      cinematic moment of the demo is triggered from here rather than from anything that
+      could fail to understand a sentence.
 
       Built for a phone held in one hand, in a dark room, by someone who is also talking.
     -->
@@ -51,13 +51,42 @@
         </span>
       </header>
 
-      <!-- Live room state. Doubles as the target selector: tapping a node selects it. -->
+      <!--
+        Voice.
+
+        The mic is yours to open and close. Closed by default and closed the moment you tap
+        it again, because a presenter is talking to an audience for most of the demo and
+        nothing they say to the room should be interpreted as a command.
+
+        Recognition happens in this browser and is matched against a fixed set of phrases
+        locally — no model, no server round trip, no LLM in the path. That means it keeps
+        working when the AI layer does not.
+      -->
+      <section class="voice" id="voice" hidden>
+        <button class="mic" id="mic" type="button" aria-pressed="false">
+          <span class="mic-icon" id="mic-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none"
+                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <rect x="9" y="2.5" width="6" height="11" rx="3" />
+              <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+              <path d="M12 17.5V21" />
+              <line class="mic-slash" x1="3.5" y1="3.5" x2="20.5" y2="20.5" />
+            </svg>
+          </span>
+          <span class="mic-label" id="mic-label">MIC OFF</span>
+        </button>
+        <div class="voice-heard" id="voice-heard"></div>
+      </section>
+
+      <!-- Live room. Tap a device to target it. -->
       <section class="nodes" id="nodes"></section>
 
-      <!-- Which node the next action applies to. -->
       <section class="target-row">
         <span class="label">TARGET</span>
         <strong class="target-value" id="target-value">ALL</strong>
+        <button class="speaker" id="speaker" type="button" aria-pressed="false">
+          <span id="speaker-label">JARVIS AUDIBLE</span>
+        </button>
       </section>
 
       <section class="actions">
@@ -100,21 +129,15 @@
       <!--
         Scripted speech.
 
-        The LLM is the least controllable part of the stack, so every line the demo
-        actually needs exists here as a button. If the voice layer fails, the presenter
-        taps instead of asking and the room never learns the difference. SPEC.md §39
-        applied to speech.
+        Every line the demo needs is a button. If the voice layer fails, mishears, or the
+        venue is too loud, the presenter taps instead of asking and the room never learns
+        the difference. SPEC.md §39 applied to speech.
       -->
       <section class="group">
         <div class="label">JARVIS SAYS</div>
         <div class="chips" id="phrase-chips"></div>
         <form class="inline-form" id="speak-form">
-          <input
-            class="text-input"
-            id="speak-input"
-            placeholder="say something"
-            autocomplete="off"
-          />
+          <input class="text-input" id="speak-input" placeholder="say something" autocomplete="off" />
           <button class="btn btn-small" type="submit">SPEAK</button>
         </form>
       </section>
@@ -123,14 +146,15 @@
     </main>
 
     <!--
-      SPEC.md §33. Fixed to the bottom of the viewport, present on every scroll position,
-      never disabled, and the only red control on the page. If exactly one thing on this
-      page works, it has to be this one.
+      SPEC.md §33. Fixed to the bottom of the viewport, present at every scroll position,
+      never disabled, and the only red control on the page. If exactly one thing here
+      works, it has to be this one.
     -->
     <button class="release-all" id="release-all" hidden>RELEASE ALL</button>
 
     <script src="/shared/stream.js"></script>
     <script src="/shared/session.js"></script>
+    <script src="/control/voice.js"></script>
     <script src="/control/control.js"></script>
   </body>
 </html>

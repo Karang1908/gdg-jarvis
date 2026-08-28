@@ -91,7 +91,7 @@
 
   /** Confirm a token before storing it, so a typo fails at the sign-in rather than later. */
   function signIn(candidate) {
-    return fetch('/api/nodes', { headers: { Authorization: 'Bearer ' + candidate } }).then(
+    return fetch('/api/devices', { headers: { Authorization: 'Bearer ' + candidate } }).then(
       function (response) {
         if (!response.ok) return false;
         setToken(candidate);

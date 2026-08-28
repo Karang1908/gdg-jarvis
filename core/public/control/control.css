@@ -81,10 +81,24 @@
   opacity: 0.4;
 }
 
+/* The device number, at the size of the thing you actually aim a thumb at. */
 .node-chip .node-id {
-  font-size: 14px;
-  letter-spacing: 0.2em;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 0.06em;
   color: var(--cyan-bright);
+}
+
+/* The hostname. How you know which chip is your own laptop. */
+.node-chip .node-host {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-chip .node-sub {
@@ -92,6 +106,123 @@
   letter-spacing: 0.1em;
   color: var(--ink-faint);
   text-align: center;
+}
+
+.node-chip.is-wall .node-id::after {
+  content: "";
+  display: block;
+  width: 1.2em;
+  height: 2px;
+  margin: 3px auto 0;
+  background: var(--cyan-dim);
+}
+
+/* --------------------------------------------------------------------------------------
+ * Microphone
+ *
+ * Your microphone, not JARVIS's voice. Given its own row at the top of the console because
+ * it is the control most likely to be reached for mid-sentence, and because leaving a mic
+ * open by accident is the kind of mistake that should be visible at a glance.
+ * ----------------------------------------------------------------------------------- */
+
+.voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1ch;
+  min-height: 60px;
+  padding: 0.8rem;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--cyan-ghost);
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.mic-icon {
+  display: flex;
+  line-height: 0;
+}
+
+/* Off is the resting state, so the slash is drawn by default and removed when live —
+   the icon reads correctly at a glance without needing the label. */
+.mic.is-on {
+  color: var(--cyan-bright);
+  border-color: var(--cyan);
+  background: rgba(79, 216, 255, 0.12);
+}
+
+.mic.is-on .mic-slash {
+  display: none;
+}
+
+.mic.is-on .mic-icon {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.mic.is-denied {
+  color: var(--alert);
+  border-color: var(--alert-dim);
+}
+
+.mic.is-unavailable {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* What was heard. Present even when nothing matched, because "the mic is live and did not
+   recognise that" and "the mic is dead" must never look the same. */
+.voice-heard {
+  min-height: 1.4em;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.voice-heard.is-interim {
+  color: var(--ink-faint);
+  opacity: 0.6;
+}
+
+.voice-heard.is-command {
+  color: var(--cyan);
+}
+
+.voice-heard.is-ignored {
+  color: var(--ink-faint);
+}
+
+/* --------------------------------------------------------------------------------------
+ * JARVIS audible
+ * ----------------------------------------------------------------------------------- */
+
+.speaker {
+  margin-left: auto;
+  min-height: 40px;
+  padding: 0.4rem 0.9rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--cyan-dim);
+  background: transparent;
+  border: 1px solid var(--cyan-ghost);
+  cursor: pointer;
+}
+
+.speaker.is-muted {
+  color: var(--amber);
+  border-color: var(--amber-dim);
 }
 
 .target-row {
