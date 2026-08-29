@@ -588,9 +588,11 @@ async function handleUtterance(text, source) {
   if (intent) {
     if (intent.answer === 'count') {
       const online = registry.onlineDevices().length;
+      // Spelled out, not a digit: this is the exact string phrases.json warms, so the
+      // answer comes from the cache at full quality rather than costing a live synthesis.
       const line = online === 0 ? 'No systems are online, sir.'
         : online === 1 ? 'One authorized system is online.'
-        : `${online} authorized systems are online.`;
+        : `${intents.numberWord(online)} authorized systems are online.`;
       commands.speakAsJarvis(line, { source });
       return { ok: true, matched: intent.name, spoken: line };
     }
