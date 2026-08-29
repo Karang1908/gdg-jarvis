@@ -9,7 +9,7 @@
  * but a Node runtime — no install step, which matters because that machine has no
  * internet while its Wi-Fi is busy being the AP.
  *
- *   node core/server.js --config core/config/nodes.json --host 10.42.0.1 --port 3000
+ *   node core/server.js --host 10.42.0.1 --port 3000
  *
  * Ctrl+C releases the room before exiting. Losing Core should never leave a teammate
  * looking at a black screen.
@@ -229,10 +229,10 @@ router.post('/api/agent/register', async (req, res, context) => {
 });
 
 router.get('/api/agent/stream', (req, res, context) => {
-  const nodeId = Number(context.query.get('device'));
-  const sessionId = context.query.get('session');
+  const streamDevice = registry.bySession(context.query.get('session'));
+  const nodeId = streamDevice ? streamDevice.number : Number(context.query.get('device'));
 
-  if (!registry.sessionValid(nodeId, sessionId)) {
+  if (!streamDevice) {
     log.deny('stream refused', { node: nodeId, reason: 'bad_session', from: context.address });
     return text(res, 401, 'REJECT bad_session');
   }
@@ -257,8 +257,12 @@ router.post('/api/agent/heartbeat', async (req, res) => {
   const body = await readBody(req);
   if (!body) return text(res, 400, 'REJECT malformed_body');
 
-  const nodeId = Number(body.device);
-  if (!registry.sessionValid(nodeId, body.session)) return text(res, 401, 'REJECT bad_session');
+  // Resolve by session, never by the number the agent sent: after a renumber the agent's
+  // copy is stale through no fault of its own, and trusting it would credit the heartbeat
+  // to whichever device now holds that number.
+  const device = registry.bySession(body.session);
+  if (!device) return text(res, 401, 'REJECT bad_session');
+  const nodeId = device.number;
 
   registry.heartbeat(nodeId, {
     state: body.state,
@@ -276,8 +280,9 @@ router.post('/api/agent/ack', async (req, res) => {
   const body = await readBody(req);
   if (!body) return text(res, 400, 'REJECT malformed_body');
 
-  const nodeId = Number(body.device);
-  if (!registry.sessionValid(nodeId, body.session)) return text(res, 401, 'REJECT bad_session');
+  const device = registry.bySession(body.session);
+  if (!device) return text(res, 401, 'REJECT bad_session');
+  const nodeId = device.number;
 
   commands.acknowledge(nodeId, body.cid, body.status || 'success', body.msg || null);
   return text(res, 200, 'OK');

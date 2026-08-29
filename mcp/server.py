@@ -586,7 +586,7 @@ if __name__ == "__main__":
         # the presenter would see silence instead of a cause.
         raise SystemExit(
             "JARVIS_ADMIN_TOKEN is not set.\n"
-            "  It is the `admin.token` value in core/config/core.json on the Core machine."
+            "  It is JARVIS_ADMIN_PASSWORD in the .env on the Core machine."
         )
 
     mcp.run()

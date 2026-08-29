@@ -254,9 +254,31 @@ function resolve(input) {
   return { ok: false, reason: 'device_unknown' };
 }
 
+/**
+ * Find a device by its session, ignoring whatever number it thinks it has.
+ *
+ * Sessions are unique and are never reassigned, so this is the only identifier that
+ * survives a renumber. An agent keeps the number it was given at enrollment and has no way
+ * to learn it changed; identifying by number meant that renumbering two devices left *both*
+ * agents failing every heartbeat and acknowledgement with a 401, forever, until something
+ * restarted them.
+ */
+function bySession(sessionId) {
+  if (!sessionId) return null;
+  for (const device of devices.values()) {
+    if (device.sessionId && device.sessionId === sessionId) return device;
+  }
+  return null;
+}
+
+/**
+ * Is this session live?
+ *
+ * The claimed number is deliberately ignored. It is a hint from an agent that may be out of
+ * date through no fault of its own.
+ */
 function sessionValid(number, sessionId) {
-  const device = get(number);
-  return Boolean(device && device.sessionId && sessionId && device.sessionId === sessionId);
+  return Boolean(bySession(sessionId));
 }
 
 /** Attach a device's command stream. This is the moment it becomes online. */
@@ -523,6 +545,7 @@ module.exports = {
   jarvisDevice,
   isWall,
   sessionValid,
+  bySession,
   attachAgent,
   attachOverlay,
   heartbeat,
