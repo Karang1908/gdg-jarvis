@@ -3,7 +3,8 @@
 # Bring up JARVIS-NET and JARVIS Core on the Kali laptop.
 #
 #   sudo scripts/setup-kali.sh                  # check, generate secrets, create the hotspot
-#   scripts/setup-kali.sh --secrets-only        # regenerate secrets, touch nothing else
+#   scripts/setup-kali.sh --secrets-only        # regenerate BOTH secrets
+#   scripts/setup-kali.sh --set-admin '<pass>'  # change only the admin password
 #   scripts/setup-kali.sh --check               # report readiness, change nothing
 #
 # Implements SPEC.md §4. Every step is checked before it is taken, because the one thing
@@ -20,16 +21,97 @@ CONNECTION="$SSID"
 PASSPHRASE="${JARVIS_WIFI_PASSPHRASE:-gdg@essentials2026}"
 
 MODE="full"
+NEW_ADMIN=""
 case "${1:-}" in
   --secrets-only|--tokens-only) MODE="secrets" ;;
+  --set-admin) MODE="set-admin"; NEW_ADMIN="${2:-}" ;;
   --check) MODE="check" ;;
-  --help|-h) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --help|-h) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn()  { printf '  \033[33m!\033[0m %s\n' "$*"; }
 fail()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+
+# This script needs sudo for nmcli, but Core does not run as root. Anything created along
+# the way is handed back to the invoking user — otherwise core.json ends up root-owned at
+# mode 600 and Core, started normally, cannot read its own configuration.
+hand_back() {
+  [ -n "${SUDO_USER:-}" ] || return 0
+  [ -e "$1" ] || return 0
+  chown "$SUDO_USER":"$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")" "$1" 2>/dev/null
+}
+
+
+# ---------------------------------------------------------------------------------------
+# Change only the admin password
+#
+# Separate from --secrets-only on purpose. Regenerating both secrets invalidates the join
+# line every teammate is holding, and doing that because you wanted a password you could
+# type on a phone would be a genuinely annoying way to lose a room.
+# ---------------------------------------------------------------------------------------
+
+if [ "$MODE" = "set-admin" ]; then
+  bold ""
+  bold "JARVIS — admin password"
+  bold ""
+
+  [ -f "$CONFIG" ] || { fail "no $(basename "$CONFIG") — run setup first"; exit 1; }
+  [ -n "$NEW_ADMIN" ] || { fail "usage: scripts/setup-kali.sh --set-admin '<password>'"; exit 1; }
+
+  # Leading or trailing whitespace makes a password that can never be used: the
+  # Authorization header is trimmed before comparison, so the value sent can never match
+  # the value stored. Refuse it rather than writing a config that locks the operator out.
+  TRIMMED=$(printf '%s' "$NEW_ADMIN" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  if [ "$TRIMMED" != "$NEW_ADMIN" ]; then
+    fail "that password has leading or trailing whitespace and could never be entered"
+    warn "using the trimmed form instead: '$TRIMMED'"
+    NEW_ADMIN="$TRIMMED"
+  fi
+  [ -n "$NEW_ADMIN" ] || { fail "password is empty"; exit 1; }
+
+  # This is the key to every enrolled laptop. Short is the operator's call to make, but it
+  # should be a decision rather than an accident.
+  if [ "${#NEW_ADMIN}" -lt 8 ]; then
+    warn "that is ${#NEW_ADMIN} characters — anyone on the Wi-Fi can try to guess it"
+  fi
+
+  node -e '
+    const fs = require("fs");
+    const [file, password] = process.argv.slice(1);
+    const config = JSON.parse(fs.readFileSync(file, "utf8"));
+
+    // Core refuses to boot if these match, because the join secret is handed out inside
+    // every teammate'"'"'s script — the two must never be the same value.
+    if (config.join && config.join.secret === password) {
+      console.error("SAME");
+      process.exit(3);
+    }
+
+    config.admin = config.admin || {};
+    config.admin.token = password;
+    fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+  ' "$CONFIG" "$NEW_ADMIN"
+
+  STATUS=$?
+  if [ $STATUS -eq 3 ]; then
+    fail "that is already the join secret — the two must differ"
+    exit 1
+  fi
+  [ $STATUS -eq 0 ] || { fail "could not update $(basename "$CONFIG")"; exit 1; }
+
+  chmod 600 "$CONFIG"
+  hand_back "$CONFIG"
+  ok "admin password set"
+  printf '\n    \033[1m%s\033[0m\n\n' "$NEW_ADMIN"
+
+  warn "restart Core for it to take effect"
+  warn "anything holding the old one needs updating:"
+  printf '      scripts/install-mcp.sh          # Antigravity keeps a copy\n'
+  printf '      /control/ and /wall/            # sign in again\n\n'
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------------------
 # Preflight
@@ -215,15 +297,6 @@ fi
 bold ""
 bold "Secrets"
 
-# This script needs sudo for nmcli, but Core does not run as root. Anything created along
-# the way is handed back to the invoking user — otherwise core.json ends up root-owned at
-# mode 600 and Core, started normally, cannot read its own configuration.
-hand_back() {
-  [ -n "${SUDO_USER:-}" ] || return 0
-  [ -e "$1" ] || return 0
-  chown "$SUDO_USER":"$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")" "$1" 2>/dev/null
-}
-
 generate() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
@@ -244,9 +317,13 @@ else
     warn "previous config saved to $(basename "$backup")"
   fi
 
+  # An admin password supplied by the operator beats a random one — it is typed on a phone
+  # every time the controller is opened, and a 32-character hex string is not.
+  ADMIN_VALUE="${JARVIS_ADMIN_TOKEN:-$(generate)}"
+
   cat > "$CONFIG" <<JSON
 {
-  "admin": { "token": "$(generate)" },
+  "admin": { "token": "$ADMIN_VALUE" },
   "join":  { "secret": "$(generate)" },
   "wifi":  { "ssid": "$SSID", "passphrase": "$PASSPHRASE" }
 }

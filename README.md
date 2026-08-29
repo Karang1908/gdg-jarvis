@@ -108,7 +108,16 @@ piped from `curl` is not. See [D1](docs/DEVIATIONS.md#d1--zero-dependency-agents
 ### 4. Presenter — the wall and the controller
 
 Open `http://10.42.0.1:3000/wall/` fullscreen on the display, and
-`http://10.42.0.1:3000/control/` on a phone. Both ask once for the admin token.
+`http://10.42.0.1:3000/control/` on a phone. Both ask once for the admin password.
+
+Set one you can actually type on a phone — the generated default is 32 hex characters:
+
+```bash
+scripts/setup-kali.sh --set-admin 'your-password'
+```
+
+That changes only the admin password. It deliberately does **not** touch the join secret,
+because regenerating that invalidates the join line every teammate is holding.
 
 The controller carries two toggles that are easy to confuse, so they are worded apart:
 

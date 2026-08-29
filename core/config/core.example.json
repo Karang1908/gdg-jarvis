@@ -1,7 +1,7 @@
 {
   "_comment": "Copy to core.json and replace both secrets before running. core.json is gitignored so real secrets never reach the repository. scripts/setup-kali.sh --secrets-only generates one for you.",
 
-  "_admin": "The key to the room. The controller and the MCP server hold it. Never handed to a teammate.",
+  "_admin": "The key to the room. The controller and the MCP server hold it, and it is never handed to a teammate. You type it on a phone every time you open the controller, so a memorable password beats a random string: scripts/setup-kali.sh --set-admin 'your-password'",
   "admin": {
     "token": "CHANGE-ME-admin-token"
   },
