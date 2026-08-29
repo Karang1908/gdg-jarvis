@@ -61,7 +61,7 @@ if [ "$MODE" = "test" ]; then
   bold "JARVIS — voice test"
   bold ""
 
-  node -e '
+  JARVIS_QUIET=1 node -e '
     const voice = require("./core/lib/voice.js");
     const state = voice.init(require("./core/lib/settings.js").load().voice);
 
@@ -170,7 +170,7 @@ bold ""
 # Everything below runs inside Core's own modules rather than over HTTP, because warming is
 # a local operation on a local directory and going through the API would only add a way for
 # it to be pointed at the wrong machine's cache.
-node -e '
+JARVIS_QUIET=1 node -e '
 const fs = require("fs");
 const path = require("path");
 const voice = require("./core/lib/voice.js");
@@ -268,7 +268,7 @@ if [ "$MODE" = "warm" ] && [ $STATUS -eq 0 ]; then
   # The number that matters at showtime is how long a cached line takes to start, and it is
   # a property of this machine's audio player rather than of the synthesiser. Measure it
   # here so it is a known quantity rather than a surprise on stage.
-  node -e '
+  JARVIS_QUIET=1 node -e '
     const voice = require("./core/lib/voice.js");
     const fs = require("fs");
     const state = voice.init(require("./core/lib/settings.js").load().voice);
