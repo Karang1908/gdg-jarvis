@@ -20,6 +20,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
+const env = require('./lib/env');
 const personality = require('./lib/personality');
 
 const auth = require('./lib/auth');
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     layout: path.join(__dirname, 'config', 'layout.json'),
     personality: path.join(__dirname, 'config', 'personality.md'),
     phrases: path.join(__dirname, 'config', 'phrases.json'),
+    env: path.join(__dirname, '..', '.env'),
   };
 
   for (let i = 2; i < argv.length; i += 2) {
@@ -77,6 +79,9 @@ function parseArgs(argv) {
       case '--phrases':
         options.phrases = path.resolve(value);
         break;
+      case '--env':
+        options.env = path.resolve(value);
+        break;
       case '--help':
       case '-h':
         console.log(
@@ -97,6 +102,10 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv);
 
+// Before anything reads process.env. A .env next to the repository is the easy place to
+// put an API key without it landing in a file that sits beside the code.
+const envFile = env.load(options.env);
+
 // ---------------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------------
@@ -104,7 +113,15 @@ const options = parseArgs(process.argv);
 try {
   const config = auth.load(options.config);
   validate.loadApps(options.apps);
-  voice.init(config.voice || {});
+  const voiceState = voice.init(config.voice || {});
+  if (envFile.loaded) {
+    log.info('.env loaded', { keys: envFile.keys.length, from: path.basename(envFile.path) });
+  }
+  if (!voiceState.natural && voiceState.available) {
+    log.warn('using the fallback voice', {
+      fix: 'set GEMINI_API_KEY in .env, or install piper',
+    });
+  }
   personality.load(options.personality);
   choreography.init(require(options.layout));
   registry.reset();
