@@ -527,11 +527,29 @@
     }
   }
 
-  /** What Core heard, pushed over the event stream as it hears it. */
+  /**
+   * What Core heard, and what it is doing about it.
+   *
+   * Showing the difference matters more than showing the words. A presenter who says
+   * something and sees nothing happen needs to know which of three things went wrong:
+   * the mic is dead, the phrase was not a command, or it was not addressed to JARVIS at
+   * all. Silence looks the same in every case; this does not.
+   */
   function showHeard(event) {
     if (!event || !event.text) return;
-    voiceHeard.className = 'voice-heard is-command';
-    voiceHeard.textContent = '\u201c' + event.text + '\u201d';
+
+    var quoted = '\u201c' + event.text + '\u201d';
+
+    if (event.status === 'ignored') {
+      voiceHeard.className = 'voice-heard is-ignored';
+      voiceHeard.textContent = quoted + ' \u2014 not addressed to JARVIS';
+    } else if (event.status === 'thinking') {
+      voiceHeard.className = 'voice-heard is-interim';
+      voiceHeard.textContent = quoted + ' \u2014 thinking\u2026';
+    } else {
+      voiceHeard.className = 'voice-heard is-command';
+      voiceHeard.textContent = quoted;
+    }
   }
 
   /* ----------------------------------------------------------------------------------
