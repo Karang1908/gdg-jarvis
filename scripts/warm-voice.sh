@@ -6,6 +6,7 @@
 #   scripts/warm-voice.sh --list           # show what would be generated
 #   scripts/warm-voice.sh --say "one off"  # add a line and cache it
 #   scripts/warm-voice.sh --clear          # throw the cache away and start again
+#   scripts/warm-voice.sh --test           # say something, and report exactly what is wrong
 #
 # Run this once, on the Core machine, while it still has internet. Every phrase in
 # core/config/phrases.json is synthesised with the best provider available and left on
@@ -32,6 +33,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --list) MODE="list"; shift ;;
     --clear) MODE="clear"; shift ;;
+    --test) MODE="test"; shift ;;
     --say) MODE="one"; EXTRA="${2:-}"; shift 2 ;;
     --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -44,6 +46,78 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
 
 [ -f "$CONFIG" ] || { bad "no .env — cp .env.example .env and edit it"; exit 1; }
+
+# ---------------------------------------------------------------------------------------
+# Self test
+#
+# The two halves of a voice fail for unrelated reasons — no text-to-speech program, or
+# nothing that can play audio — and a machine with working speakers can be missing either.
+# This reports both, then makes a sound, because the only convincing evidence that audio
+# works is hearing it.
+# ---------------------------------------------------------------------------------------
+
+if [ "$MODE" = "test" ]; then
+  bold ""
+  bold "JARVIS — voice test"
+  bold ""
+
+  node -e '
+    const voice = require("./core/lib/voice.js");
+    const state = voice.init(require("./core/lib/settings.js").load().voice);
+
+    const tick = (yes, text) =>
+      console.log(`  ${yes ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m"} ${text}`);
+
+    tick(state.hasSynth, state.hasSynth
+      ? `text-to-speech: ${state.provider}${state.voice ? " / " + state.voice : ""}`
+      : "text-to-speech: nothing installed and no API key");
+
+    tick(state.hasPlayer, state.hasPlayer
+      ? `audio player: ${state.player}`
+      : "audio player: none (this is separate from whether your speakers work)");
+
+    if (!state.available) {
+      console.log("");
+      console.log("  JARVIS will be silent. Fix whichever is marked above:");
+      if (!state.hasSynth) {
+        console.log("    GEMINI_API_KEY=... in .env       free, and the good voice");
+        console.log("    sudo apt install -y espeak-ng speech-dispatcher");
+      }
+      if (!state.hasPlayer) {
+        console.log("    sudo apt install -y pulseaudio-utils");
+      }
+      process.exit(1);
+    }
+
+    if (!state.natural) {
+      console.log("  \x1b[33m!\x1b[0m this is the fallback voice — set GEMINI_API_KEY for a natural one");
+    }
+
+    console.log("");
+    console.log("  speaking now — you should hear it...");
+
+    (async () => {
+      const at = Date.now();
+      const result = await voice.speak("JARVIS voice test. If you can hear this, the voice is working.");
+      const ms = Date.now() - at;
+
+      if (result.ok) {
+        console.log(`  \x1b[32m✓\x1b[0m played via ${result.source} in ${ms}ms`);
+        console.log("");
+        console.log("  Heard nothing? The command worked, so it is the audio route, not JARVIS:");
+        console.log("    - over SSH there is no audio session; run this at the machine itself");
+        console.log("    - check the output device and volume:  pactl list short sinks");
+        console.log("    - as root, PulseAudio often belongs to the desktop user instead");
+      } else {
+        console.log(`  \x1b[31m✗\x1b[0m could not speak: ${result.error}`);
+        process.exit(1);
+      }
+    })();
+  '
+  STATUS=$?
+  printf '\n'
+  exit $STATUS
+fi
 
 bold ""
 bold "JARVIS — voice cache"

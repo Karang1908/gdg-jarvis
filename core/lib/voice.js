@@ -439,13 +439,23 @@ function init(options = {}) {
 
   if (!usable.length) {
     if (enabled) {
-      log.warn('JARVIS has no usable voice on this machine');
-      if (chain.length && !player) {
-        log.warn('a synthesiser is available but nothing can play audio', {
-          install: 'sudo apt install pulseaudio-utils   # or alsa-utils, mpv',
-        });
+      // Two entirely different problems produce silence, and conflating them sends people
+      // to check their speakers when the real answer is that no text-to-speech program is
+      // installed. Say which one it is.
+      const haveSynth = chain.length > 0;
+
+      if (haveSynth && !player) {
+        log.warn('JARVIS cannot speak: a voice is configured, but nothing here can play audio');
+        log.warn('  your speakers are fine — this machine has no audio player command');
+        log.warn('  sudo apt install -y pulseaudio-utils      # gives you paplay');
+      } else if (!haveSynth && player) {
+        log.warn('JARVIS cannot speak: audio works, but there is no text-to-speech program');
+        log.warn('  set GEMINI_API_KEY in .env for a natural voice (free), or:');
+        log.warn('  sudo apt install -y espeak-ng speech-dispatcher');
       } else {
-        log.warn('install one of:  gemini api key  ·  piper  ·  speech-dispatcher  ·  espeak-ng');
+        log.warn('JARVIS cannot speak: no text-to-speech program and no audio player');
+        log.warn('  sudo apt install -y espeak-ng speech-dispatcher pulseaudio-utils');
+        log.warn('  and set GEMINI_API_KEY in .env for a voice worth listening to');
       }
     }
     chain = [];
@@ -482,6 +492,9 @@ function describe() {
   return {
     enabled,
     available: chain.length > 0,
+    // Reported separately because they fail for unrelated reasons and have different fixes.
+    hasSynth: PREFERENCE.some((name) => PROVIDERS[name] && PROVIDERS[name].available()),
+    hasPlayer: Boolean(player),
     provider: chain[0] || null,
     fallbacks: chain.slice(1),
     natural: chain[0] === 'gemini' || chain[0] === 'piper',

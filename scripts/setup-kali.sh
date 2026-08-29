@@ -197,6 +197,9 @@ if [ -n "$VOICE_MISSING" ]; then
   warn "  sudo apt install -y$(printf ' %s' $VOICE_MISSING)"
 fi
 
+# Whatever the checks above concluded, the only convincing evidence is hearing it.
+warn "to hear it for yourself:  scripts/warm-voice.sh --test"
+
 if [ "$MODE" = "check" ]; then
   bold ""
   [ "$problems" -eq 0 ] && ok "ready" || fail "$problems problem(s) above"
