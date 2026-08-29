@@ -35,16 +35,25 @@ const SPEECH_TIMEOUT_MS = 10_000;
 /**
  * How long a live synthesis may take before the local voice takes over.
  *
- * Off by default. A one-second budget was the original guess, and in practice Gemini
- * routinely takes longer than that — so the guard fired constantly and the room got the
- * robotic fallback instead of the voice it was configured for. Waiting a moment for the
- * good voice beats never hearing it.
+ * Four seconds, which is a stated requirement rather than a guess: best available quality,
+ * and not one second past four.
  *
- * Set JARVIS_VOICE_BUDGET_MS to re-enable it if a venue's connection turns out to be bad
- * enough that waiting is worse than sounding flat. Zero means wait, up to the hard timeout
- * that stops a wedged call hanging forever.
+ * It has been wrong in both directions. One second was the original value and it fired
+ * constantly — Gemini routinely takes longer, so the room heard the robotic fallback
+ * instead of the voice it was configured for. Disabling it entirely was the correction,
+ * and that was wrong the other way: a slow uplink could leave the room silent for fifteen
+ * seconds with no way to tell whether anything was coming.
+ *
+ * What makes four seconds workable rather than a compromise is the two things around it.
+ * A line that blows the budget is still being synthesised in the background and still gets
+ * cached, so it is instant and full quality the second time. And every line the demo plans
+ * to say is warmed ahead of time, so the budget almost never applies to them at all — it
+ * is a guard for novel sentences, not the normal path.
+ *
+ * Set JARVIS_VOICE_BUDGET_MS to override. Zero disables it and waits, up to the hard
+ * timeout that stops a wedged call hanging forever.
  */
-const DEFAULT_BUDGET_MS = 0;
+const DEFAULT_BUDGET_MS = 4_000;
 
 /** The hard ceiling on a background call, once the budget has already been given up on. */
 const SYNTH_TIMEOUT_MS = 15_000;
@@ -456,8 +465,15 @@ function resolve(options) {
   if (env.JARVIS_GEMINI_MODEL) merged.gemini.model = env.JARVIS_GEMINI_MODEL;
   if (env.JARVIS_PIPER_MODEL) merged.piper.model = env.JARVIS_PIPER_MODEL;
 
+  // The default has to be applied here rather than at the point of use, because zero is a
+  // meaningful value there — it means "no budget, wait for the good voice" — and cannot
+  // also stand for "nothing was configured".
   const budget = Number(env.JARVIS_VOICE_BUDGET_MS);
-  if (Number.isFinite(budget) && budget > 0) merged.budgetMs = budget;
+  if (Number.isFinite(budget) && budget >= 0) {
+    merged.budgetMs = budget;
+  } else if (merged.budgetMs === undefined) {
+    merged.budgetMs = DEFAULT_BUDGET_MS;
+  }
 
   return merged;
 }
