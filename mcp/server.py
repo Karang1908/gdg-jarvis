@@ -536,6 +536,40 @@ def voice_status() -> dict[str, Any]:
 
 
 @mcp.tool()
+def microphone(on: bool | None = None) -> dict[str, Any]:
+    """Open or close your own microphone, or ask whether it is open.
+
+    The microphone is on the machine you are running on, next to the speakers — not on the
+    presenter's phone. The phone's mic button is a remote for this. Call with no argument to
+    check, or with on=True / on=False to change it.
+
+    Closing it is the honest way to answer "stop listening". Note that you are reached
+    through what it hears, so closing it means the presenter must use the phone or a
+    keyboard to open it again — say so before you do it.
+    """
+    if on is None:
+        result = _call("/api/mic")
+    else:
+        result = _call("/api/mic", {"on": bool(on)})
+
+    if result.get("error"):
+        return {"ok": False, "action": "microphone", "error": result["error"]}
+
+    # available and listening differ: a machine with no recorder can never listen, and that
+    # needs a different sentence than a microphone that is merely switched off.
+    return {
+        "ok": True,
+        "action": "microphone",
+        "listening": result.get("listening"),
+        "available": result.get("available"),
+        "records_with": result.get("capture"),
+        "transcribes_with": result.get("transcribe"),
+        # True when capture cannot hear a pause, so speech is cut into fixed blocks.
+        "fixed_window": result.get("fixedWindow"),
+    }
+
+
+@mcp.tool()
 def overlay_url(device: str, scene: str | None = None) -> dict[str, Any]:
     """Get a link that opens a device's JARVIS screen in any browser.
 
