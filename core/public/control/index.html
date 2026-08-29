@@ -81,6 +81,19 @@
       <!-- Live room. Tap a device to target it. -->
       <section class="nodes" id="nodes"></section>
 
+      <!--
+        Setup actions for the selected device: which number it has, and which one is main.
+        Hidden until a specific device is selected, because they are things you do while
+        setting up, not while presenting.
+      -->
+      <section class="device-panel" id="device-panel" hidden>
+        <span class="panel-label" id="panel-label"></span>
+        <button class="btn btn-small" id="make-main" type="button">MAKE MAIN</button>
+        <input class="num-input" id="renumber-to" type="number" min="1" max="99" inputmode="numeric" />
+        <button class="btn btn-small" id="renumber" type="button">SET NUMBER</button>
+        <button class="btn btn-small" id="forget" type="button">FORGET</button>
+      </section>
+
       <section class="target-row">
         <span class="label">TARGET</span>
         <strong class="target-value" id="target-value">ALL</strong>

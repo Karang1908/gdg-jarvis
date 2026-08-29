@@ -108,13 +108,53 @@
   text-align: center;
 }
 
+/* The device the operator calls "main" — the one showing the Command Wall. Labelled
+   rather than marked with a rule, because "MAIN" is the word they will say out loud. */
 .node-chip.is-wall .node-id::after {
-  content: "";
+  content: "MAIN";
   display: block;
-  width: 1.2em;
-  height: 2px;
-  margin: 3px auto 0;
-  background: var(--cyan-dim);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--cyan-dim);
+  margin-top: 2px;
+}
+
+/* --------------------------------------------------------------------------------------
+ * Device panel
+ *
+ * Opens under the chips when a device is selected. Renumbering and making something main
+ * are setup actions, not demo actions, so they are deliberately one level down rather than
+ * competing with TAKE THE ROOM for a thumb.
+ * ----------------------------------------------------------------------------------- */
+
+.device-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.7rem;
+  border: 1px solid var(--cyan-ghost);
+  background: rgba(10, 34, 54, 0.35);
+}
+
+.device-panel .panel-label {
+  flex: 1 1 100%;
+  font-size: 10px;
+  letter-spacing: var(--trace);
+  color: var(--ink-faint);
+}
+
+.num-input {
+  width: 4.5rem;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 16px;
+  text-align: center;
+  color: var(--ink);
+  background: rgba(0, 8, 16, 0.8);
+  border: 1px solid var(--cyan-dim);
+  outline: none;
 }
 
 /* --------------------------------------------------------------------------------------

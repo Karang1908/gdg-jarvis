@@ -122,6 +122,7 @@
     }
 
     if (device.muted) status = status + ' · muted';
+    if (device.isWall) status = 'main · ' + status;
 
     card.classList.toggle('is-offline', !device.online);
     card.classList.toggle('is-dark', Boolean(device.online && !device.displayAwake));

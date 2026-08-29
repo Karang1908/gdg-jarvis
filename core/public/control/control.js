@@ -33,6 +33,10 @@
   var speakerButton = document.getElementById('speaker');
   var speakerLabel = document.getElementById('speaker-label');
 
+  var devicePanel = document.getElementById('device-panel');
+  var panelLabel = document.getElementById('panel-label');
+  var renumberTo = document.getElementById('renumber-to');
+
   var target = 'ALL';
   var snapshot = null;
   var apps = [];
@@ -60,6 +64,8 @@
    * If the voice layer fails, or mishears, or the venue is too loud, the presenter taps
    * and the room never learns the difference. Under ten words each, per SPEC.md §31.
    */
+  // Replaced at sign-in by core/config/phrases.json, which is also what the cache warmer
+  // reads — so every button here corresponds to a line that was pre-generated.
   var PHRASES = [
     'Yes, sir.',
     'All systems are online.',
@@ -150,6 +156,32 @@
     targetValue.textContent = target === 'ALL' ? 'ALL' : 'DEVICE ' + target;
     paintDevices();
     paintSpeaker();
+    paintPanel();
+  }
+
+  /**
+   * The setup panel for one device.
+   *
+   * Only shown for a specific device — there is no sensible "renumber ALL". The number box
+   * is pre-filled with the current number so the common move (swap two devices) is: select
+   * one, type the other's number, tap.
+   */
+  function paintPanel() {
+    if (target === 'ALL') {
+      devicePanel.hidden = true;
+      return;
+    }
+
+    var device = deviceByNumber(target);
+    if (!device) {
+      devicePanel.hidden = true;
+      return;
+    }
+
+    devicePanel.hidden = false;
+    panelLabel.textContent =
+      device.hostname + '  ·  ' + device.os + (device.isWall ? '  ·  main' : '');
+    renumberTo.value = device.number;
   }
 
   /**
@@ -361,6 +393,33 @@
       send('/api/mute', { target: target, muted: muting }, muting ? 'MUTE' : 'UNMUTE');
     });
 
+    document.getElementById('make-main').addEventListener('click', function () {
+      if (target === 'ALL') return;
+      send('/api/wall', { device: target }, 'MAKE DEVICE ' + target + ' MAIN');
+    });
+
+    document.getElementById('renumber').addEventListener('click', function () {
+      if (target === 'ALL') return;
+      var wanted = Number(renumberTo.value);
+      if (!wanted || wanted < 1) return report('enter a number', 'warn');
+      if (String(wanted) === target) return report('already device ' + wanted, 'warn');
+
+      send('/api/renumber', { device: target, to: wanted }, 'DEVICE ' + target + ' → ' + wanted).then(
+        function (result) {
+          // Follow the device to its new number, otherwise the selection silently points at
+          // whichever machine was swapped into the old slot.
+          if (result && result.ok && result.data && result.data.ok) setTarget(String(wanted));
+        }
+      );
+    });
+
+    document.getElementById('forget').addEventListener('click', function () {
+      if (target === 'ALL') return;
+      send('/api/forget', { device: target }, 'FORGET DEVICE ' + target).then(function () {
+        setTarget('ALL');
+      });
+    });
+
     // Never confirms, never disables, never depends on the current target. SPEC.md §33
     // wants one control that always gives the room back, and a confirmation dialog in
     // front of it would be one more thing to get through while a demo is going wrong.
@@ -461,6 +520,7 @@
     paintDevices();
     paintMoveChips();
     paintSpeaker();
+    paintPanel();
   }
 
   function begin() {
@@ -469,12 +529,22 @@
     voiceSection.hidden = false;
     releaseAll.hidden = false;
 
-    JarvisSession.api('/api/devices').then(function (result) {
-      if (!result.ok) return;
-      apps = result.data.apps || [];
-      buildChips();
-      applySnapshot(result.data);
-    });
+    JarvisSession.api('/api/phrases')
+      .then(function (result) {
+        if (result.ok && result.data && result.data.phrases) PHRASES = result.data.phrases;
+      })
+      .catch(function () {
+        /* keep the built-in list */
+      })
+      .then(function () {
+        return JarvisSession.api('/api/devices');
+      })
+      .then(function (result) {
+        if (!result.ok) return;
+        apps = result.data.apps || [];
+        buildChips();
+        applySnapshot(result.data);
+      });
 
     JarvisStream.connect({
       resolveUrl: JarvisSession.eventStreamUrl,
