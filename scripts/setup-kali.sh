@@ -398,6 +398,79 @@ else
   nmcli connection up "$CONNECTION" >/dev/null 2>&1 && ok "hotspot up"
 fi
 
+# ---------------------------------------------------------------------------------------
+# Internet sharing
+#
+# NetworkManager's hotspot uses ipv4.method=shared, which already runs dnsmasq for DHCP and
+# DNS *and* sets up NAT masquerading to whatever the default route is. So if this machine is
+# tethered to a phone, devices on JARVIS-NET normally get internet through it with no extra
+# configuration — which is what makes open_url actually load a page on a teammate's laptop.
+#
+# "Normally" is doing work in that sentence, so the three things that break it are checked
+# rather than assumed: the connection is not in shared mode, forwarding is off, or a
+# firewall is dropping FORWARD.
+# ---------------------------------------------------------------------------------------
+
+check_sharing() {
+  bold ""
+  bold "Internet sharing"
+
+  local method
+  method=$(nmcli -g ipv4.method connection show "$CONNECTION" 2>/dev/null)
+
+  if [ "$method" = "shared" ]; then
+    ok "JARVIS-NET is in shared mode — clients get DHCP, DNS and NAT"
+  else
+    warn "JARVIS-NET ipv4.method is '${method:-unknown}', not 'shared'"
+    if [ "$(id -u)" -eq 0 ]; then
+      nmcli connection modify "$CONNECTION" ipv4.method shared >/dev/null 2>&1 \
+        && ok "set it to shared — restart the hotspot to apply" \
+        || warn "could not change it; clients will have no internet"
+    else
+      warn "  sudo nmcli connection modify $CONNECTION ipv4.method shared"
+    fi
+  fi
+
+  local forwarding
+  forwarding=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)
+  if [ "$forwarding" = "1" ]; then
+    ok "IP forwarding is on"
+  else
+    # NetworkManager turns this on for a shared connection, so finding it off usually means
+    # something else turned it back off — a hardening script, or sysctl.d.
+    warn "IP forwarding is off, so nothing will route out"
+    if [ "$(id -u)" -eq 0 ]; then
+      sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 && ok "turned it on for this boot"
+      warn "  make it permanent: echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-jarvis.conf"
+    else
+      warn "  sudo sysctl -w net.ipv4.ip_forward=1"
+    fi
+  fi
+
+  # A default FORWARD policy of DROP with no accept rules is the quiet way this fails: the
+  # hotspot works, DNS resolves, and nothing loads.
+  if command -v iptables >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+    local policy
+    policy=$(iptables -L FORWARD -n 2>/dev/null | head -1 | sed -n 's/.*policy \([A-Z]*\).*/\1/p')
+    if [ "$policy" = "DROP" ] && ! iptables -L FORWARD -n 2>/dev/null | grep -q ACCEPT; then
+      warn "FORWARD policy is DROP with no accept rules — traffic will not cross"
+      warn "  sudo iptables -P FORWARD ACCEPT     (or add a rule for 10.42.0.0/24)"
+    else
+      ok "FORWARD chain will pass traffic"
+    fi
+  fi
+
+  if [ -n "$UPLINK" ] && [ "$UPLINK" != "$WIFI_IF" ]; then
+    ok "clients will reach the internet through $UPLINK"
+    warn "that also means anyone who joins JARVIS-NET is using the phone's data"
+  else
+    warn "no separate uplink, so JARVIS-NET has no internet to share"
+    warn "tether a phone over USB and restart the hotspot"
+  fi
+}
+
+check_sharing
+
 CORE_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
 [ -n "$CORE_IP" ] || CORE_IP="10.42.0.1"
 ok "core address: $CORE_IP"
