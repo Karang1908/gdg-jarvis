@@ -14,6 +14,15 @@
 
 const MAX_ENTRIES = 500;
 
+/**
+ * Suppress the terminal half of the log.
+ *
+ * The scripts that borrow Core's modules — voice auditions, the cache warmer — want their
+ * own output, not Core's startup chatter interleaved with it. Listeners still fire, so
+ * nothing that reads the log loses anything.
+ */
+const QUIET = process.env.JARVIS_QUIET === '1';
+
 const entries = [];
 const listeners = new Set();
 
@@ -60,9 +69,11 @@ function record(level, message, fields = {}) {
     .map(([k, v]) => `${k}=${v}`)
     .join(' ');
 
-  process.stdout.write(
-    `${paint('90', clock(entry.at))} ${style(message)}${detail ? ' ' + paint('90', detail) : ''}\n`
-  );
+  if (!QUIET) {
+    process.stdout.write(
+      `${paint('90', clock(entry.at))} ${style(message)}${detail ? ' ' + paint('90', detail) : ''}\n`
+    );
+  }
 
   // Listeners are the wall's SSE connections. One slow or broken client must not be able
   // to take down the log, so each is isolated.
