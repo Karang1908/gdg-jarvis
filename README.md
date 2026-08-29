@@ -61,11 +61,28 @@ JARVIS-NET itself, which is the only thing the Kali machine adds.
 ```bash
 git clone https://github.com/Karang1908/gdg-jarvis.git
 cd gdg-jarvis
+cp .env.example .env
+$EDITOR .env
+```
+
+**`.env` is the only file you edit.** It holds two passwords and a Wi-Fi passphrase:
+
+```bash
+JARVIS_ADMIN_PASSWORD=karan@1908-gdg     # what you type to control the room
+JARVIS_JOIN_SECRET=gdg-jarvis-join-2026  # what lets a device join; baked into their line
+JARVIS_WIFI_PASSWORD=gdg@essentials2026  # the Wi-Fi
+GEMINI_API_KEY=                          # optional, for the natural voice
+```
+
+Then:
+
+```bash
 sudo scripts/setup-kali.sh
 ```
 
-That checks the Wi-Fi adapter really supports AP mode, generates the two secrets, brings up
-`JARVIS-NET` with the passphrase `gdg@essentials2026`, and prints the join line.
+That checks the Wi-Fi adapter supports AP mode, brings up the network using the passphrase
+from `.env`, verifies internet sharing, and prints the join line. It never generates or
+edits a secret — you own that file.
 
 There is nothing to install. Core runs on the Node standard library alone — no
 `npm install`, which matters because during the demo this machine's Wi-Fi *is* the access
@@ -108,16 +125,11 @@ piped from `curl` is not. See [D1](docs/DEVIATIONS.md#d1--zero-dependency-agents
 ### 4. Presenter — the wall and the controller
 
 Open `http://10.42.0.1:3000/wall/` fullscreen on the display, and
-`http://10.42.0.1:3000/control/` on a phone. Both ask once for the admin password.
+`http://10.42.0.1:3000/control/` on a phone. Both ask for `JARVIS_ADMIN_PASSWORD`.
 
-Set one you can actually type on a phone — the generated default is 32 hex characters:
-
-```bash
-scripts/setup-kali.sh --set-admin 'your-password'
-```
-
-That changes only the admin password. It deliberately does **not** touch the join secret,
-because regenerating that invalidates the join line every teammate is holding.
+To change any password: edit `.env`, restart Core. Changing `JARVIS_JOIN_SECRET` means
+teammates re-run their join line; changing the admin password means re-running
+`scripts/install-mcp.sh`, since Antigravity keeps a copy.
 
 The controller carries two toggles that are easy to confuse, so they are worded apart:
 
@@ -161,11 +173,10 @@ separate uplink exists. Without one everything except the AI layer still works.
 
 ### Giving JARVIS a good voice
 
-Copy `.env.example` to `.env` and put a key in it:
+Put a key in the `.env` you already made:
 
 ```bash
-cp .env.example .env
-$EDITOR .env          # GEMINI_API_KEY=... — free at aistudio.google.com
+GEMINI_API_KEY=...    # free at aistudio.google.com/apikey
 ```
 
 That is the whole thing. JARVIS calls the model when it speaks, and plays what comes back.
@@ -276,10 +287,17 @@ rejected client never receives a command. The admin token — the one that comma
 people's* machines — is separate, is never handed out, and Core refuses to start if the two
 are ever the same value.
 
-**The LLM cannot reach a shell.** Not by policy — structurally. No action in the protocol
-carries a command line. Applications are referenced by logical name against an allowlist,
-URLs must be `http` or `https`, and every value is percent-encoded before it reaches a
-shell agent, so nothing crossing the wire can be interpreted as anything but data.
+**No MCP tool can run a command on a teammate's machine.** Not by policy — structurally.
+No action in the protocol carries a command line. Applications are referenced by logical
+name against an allowlist, URLs must be `http` or `https`, and every value is
+percent-encoded before it reaches a shell agent, so nothing crossing the wire can be
+interpreted as anything but data. That holds however the model is prompted.
+
+Be clear about what that does **not** mean: `agy` runs with `--dangerously-skip-permissions`
+and has its own `code_execution` tool, so the model *can* run shell commands **on the Kali
+machine** — verified, it did exactly that when the room's tools were unreachable. The
+boundary protects the enrolled devices, not the box driving them. Run Core as a normal user,
+not root, and treat Kali as a machine an AI has a shell on.
 
 **Release is safe.** Each overlay runs in a dedicated browser profile, which forces a
 separate process tree from the user's own browser. Terminating the overlay cannot touch
