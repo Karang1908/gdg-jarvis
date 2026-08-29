@@ -28,6 +28,25 @@ const WORD_NUMBERS = {
   eleven: 11, twelve: 12,
 };
 
+/**
+ * Numbers as JARVIS says them, not as a computer writes them.
+ *
+ * Two reasons, and the second is the one that bites. It reads better aloud — and it is what
+ * `phrases.json` warms, so a spoken count is served from the cache at full quality instead
+ * of costing a live synthesis every time somebody asks how many systems are online.
+ *
+ * Past the warmed range the digit is fine: a room that large is not this demo.
+ */
+const NUMBER_WORDS = [
+  'zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six',
+  'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve',
+];
+
+function numberWord(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n < NUMBER_WORDS.length ? NUMBER_WORDS[n] : String(value);
+}
+
 function spokenToNumber(word) {
   if (!word) return null;
   const cleaned = String(word).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -166,4 +185,4 @@ function addressed(transcript) {
   return ADDRESS.test(String(transcript || '').trim().replace(/^[,.\s]+/, ''));
 }
 
-module.exports = { match, addressed, spokenToNumber, INTENTS, WORD_NUMBERS };
+module.exports = { match, addressed, spokenToNumber, numberWord, INTENTS, WORD_NUMBERS };
