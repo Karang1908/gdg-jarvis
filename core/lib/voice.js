@@ -10,10 +10,10 @@
  *
  * Two things sit on top of that, and neither is something to think about.
  *
- * **A latency budget.** A live call that has not produced audio within the budget is
- * abandoned and the local voice speaks instead. JARVIS sounding a little flat is better
- * than JARVIS pausing for three seconds in front of a room. The abandoned call is left to
- * finish in the background and its audio is kept, so the same line is right next time.
+ * **An optional latency budget**, off by default. When set, a call that has not produced
+ * audio in time is abandoned and the local voice speaks instead. It began as a one-second
+ * default and that was wrong: Gemini routinely takes longer, so the guard fired constantly
+ * and the room heard the robotic fallback rather than the voice it was configured for.
  *
  * **A cache**, which is simply "do not pay for the same line twice". It fills itself as
  * JARVIS talks. Nothing has to be run for it to work, and a repeated line — "Yes, sir"
@@ -35,11 +35,16 @@ const SPEECH_TIMEOUT_MS = 10_000;
 /**
  * How long a live synthesis may take before the local voice takes over.
  *
- * A demo has a rhythm. Asking JARVIS a question and waiting three seconds reads as broken
- * even when it is working perfectly, so the budget is deliberately tight and the fallback
- * is automatic rather than something the operator has to notice and fix.
+ * Off by default. A one-second budget was the original guess, and in practice Gemini
+ * routinely takes longer than that — so the guard fired constantly and the room got the
+ * robotic fallback instead of the voice it was configured for. Waiting a moment for the
+ * good voice beats never hearing it.
+ *
+ * Set JARVIS_VOICE_BUDGET_MS to re-enable it if a venue's connection turns out to be bad
+ * enough that waiting is worse than sounding flat. Zero means wait, up to the hard timeout
+ * that stops a wedged call hanging forever.
  */
-const DEFAULT_BUDGET_MS = 1000;
+const DEFAULT_BUDGET_MS = 0;
 
 /** The hard ceiling on a background call, once the budget has already been given up on. */
 const SYNTH_TIMEOUT_MS = 15_000;
@@ -557,7 +562,7 @@ function describe() {
     cached: cacheDir ? countCached() : 0,
     cacheable: chain[0] ? PROVIDERS[chain[0]].kind === 'synth' : false,
     usage: { ...usage },
-    budgetMs: Number(config.budgetMs) || DEFAULT_BUDGET_MS,
+    budgetMs: Number(config.budgetMs) > 0 ? Number(config.budgetMs) : 0,
     voice:
       chain[0] === 'gemini'
         ? (config.gemini || {}).voice || 'Charon'
@@ -765,11 +770,14 @@ async function deliver(text) {
     return { ...result, source: 'cache' };
   }
 
-  const budgetMs = Number(config.budgetMs) || DEFAULT_BUDGET_MS;
+  // A budget of zero means no budget: wait for the real voice.
+  const budgetMs = Number(config.budgetMs) > 0 ? Number(config.budgetMs) : 0;
 
   if (player) {
     const started = Date.now();
-    const outcome = await synthesiseWithin(text, budgetMs);
+    const outcome = budgetMs
+      ? await synthesiseWithin(text, budgetMs)
+      : { made: await synthesise(text) };
 
     if (outcome.made) {
       const synthMs = Date.now() - started;
