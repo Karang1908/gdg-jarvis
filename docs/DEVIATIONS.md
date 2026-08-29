@@ -330,6 +330,74 @@ like a generic assistant with nothing to indicate why.
 
 ---
 
+## D13 — A cached voice, natural where it counts
+
+**Spec:** §31 has each machine speak with its own platform synthesiser.
+
+**Problem:** `espeak` on Linux sounds like a 1980s train announcement, and the whole demo
+turns on JARVIS sounding like something worth listening to. But the natural options are
+cloud calls, and putting a 1–3 second network round trip — over a tethered phone — in front
+of every line JARVIS says is not something to do live.
+
+**Change:** a provider chain with a cache in front of it.
+
+```
+speak(text)
+  ├── cached?  ── play the file                  no network, no synthesiser
+  └── not cached
+        ├── gemini   natural, needs internet ──┐
+        ├── piper    natural, local, fast    ──┤── cache ── play
+        └── say / spd-say / espeak            ──┘
+```
+
+The cache is the part that matters. Almost every line the demo needs is known in advance —
+they are listed in `core/config/phrases.json`, which is also what the controller's buttons
+read — so `scripts/warm-voice.sh` generates them all once, ahead of time, with the best
+provider available. At showtime those are files. No latency that depends on a network, and
+**the scripted beats keep their good voice even if the tether drops entirely**. Only lines
+the model invents on the spot reach a provider live, and if that call fails the chain falls
+through to something local rather than going silent.
+
+Gemini's style prompt is what justifies the call at all: the model is told *how* to deliver
+a line, not merely what to say, so "Yes, sir" comes out measured and dry. No concatenative
+engine can do that at any price.
+
+The cache key includes the provider, voice, model and style prompt, so changing any of them
+produces fresh audio. Without that, editing the style prompt and hearing no difference would
+lead straight to the conclusion that the setting does nothing.
+
+**Measured, not assumed:** a cached line still costs the audio player's startup — about
+700ms for `afplay` on macOS, which a warm-up does not reduce because it is a fixed cost in
+the binary. `paplay` on Linux is expected to be lighter, and `scripts/warm-voice.sh` prints
+the real number on whatever machine it runs on rather than leaving it to be discovered.
+
+---
+
+## D14 — Device numbers are assignable
+
+**Spec:** no equivalent; numbering did not exist until D9.
+
+**Problem:** join order is whatever order people happened to open a terminal in. The
+presenter's own machine ends up as device 4, the laptop nearest the projector is 2, and the
+run of show has to be rewritten around an accident.
+
+**Change:** `POST /api/renumber`, and a panel in the controller. Numbers can be assigned
+deliberately, and any device can be designated **main** — the one showing the Command Wall,
+and the word an operator actually says.
+
+Renumbering **swaps** with whatever holds the destination number rather than inserting and
+shifting. Shifting would renumber machines nobody touched, which is precisely what D9
+promises not to do: the presenter has already said "identify three" out loud, and it cannot
+come to mean a different laptop a minute later. A swap moves exactly two devices and is its
+own undo.
+
+The assignment is recorded against the machine's fingerprint, so it survives a reconnect —
+a laptop deliberately made device 1 is still device 1 after a Wi-Fi blip, or the assignment
+was pointless. "Main" likewise follows the machine rather than the number: renumber the main
+device and it is still main.
+
+---
+
 ## Not changed
 
 For the avoidance of doubt, these remain exactly as specified:

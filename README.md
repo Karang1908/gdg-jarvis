@@ -105,7 +105,7 @@ Ctrl+C ends remote control immediately.
 by Gatekeeper and flagged by SmartScreen, on every machine, in front of everyone. A script
 piped from `curl` is not. See [D1](docs/DEVIATIONS.md#d1--zero-dependency-agents-sse-instead-of-socketio).
 
-### 3. Presenter — the wall and the controller
+### 4. Presenter — the wall and the controller
 
 Open `http://10.42.0.1:3000/wall/` fullscreen on the display, and
 `http://10.42.0.1:3000/control/` on a phone. Both ask once for the admin token.
@@ -117,6 +117,11 @@ The controller carries two toggles that are easy to confuse, so they are worded 
 | **MIC** | Your microphone. Off by default. On, it listens for commands — "take the room", "identify two", "release the room" — matched locally in the browser, with no LLM in the path. |
 | **JARVIS AUDIBLE** | JARVIS's voice. Mutes speech without affecting anything else. |
 
+Tap a device and you can **set its number**, **make it main**, or forget it. Numbering is
+join order by default, which is whatever order people opened a terminal in — reassign it so
+it matches the room. Swaps are safe: renumbering one device moves exactly one other, never
+the whole room.
+
 Then, before you trust any of it:
 
 ```bash
@@ -126,7 +131,7 @@ scripts/health-check.sh http://10.42.0.1:3000
 Run it **from the presenter's Mac**, not from Kali. Checking Core from the machine Core
 runs on proves nothing about the Wi-Fi, and the Wi-Fi is what fails.
 
-### 4. The AI layer — also on Kali
+### 5. The AI layer — also on Kali
 
 Core, the MCP server, the `agy` CLI, and JARVIS's voice all run on the Kali machine. Run
 this **there**:
@@ -145,14 +150,36 @@ Kali needs internet for the model. Its Wi-Fi is busy being the access point, so 
 **ethernet or a phone tethered over USB**. `scripts/setup-kali.sh` tells you whether a
 separate uplink exists. Without one everything except the AI layer still works.
 
+### Giving JARVIS a good voice
+
 JARVIS speaks from Kali, so its audio output is the room's voice — feed it to the PA if
-there is one:
+there is one. Pick one:
 
 ```bash
-sudo apt install speech-dispatcher espeak-ng      # if it is not already there
+# Most natural. Free tier at aistudio.google.com. Needs internet only when warming.
+export GEMINI_API_KEY=...
+
+# Natural and fully offline.
+pip install piper-tts        # then point voice.piper.model at an en_GB .onnx
+
+# Last resort, and it sounds like it.
+sudo apt install speech-dispatcher espeak-ng
 ```
 
-### 5. Who JARVIS is
+Then **pre-generate every line the demo uses**, once, while Kali has internet:
+
+```bash
+scripts/warm-voice.sh
+```
+
+That is what makes a cloud voice safe to use live. Cached lines are files — no network, no
+synthesiser, and the scripted beats keep their good voice even if the tether drops. Only
+lines the model invents on the spot are synthesised at showtime.
+
+Edit `core/config/phrases.json` to change what gets warmed; the controller's buttons read
+the same list, so they can't drift apart.
+
+### 6. Who JARVIS is
 
 `core/config/personality.md` is the system prompt. Plain markdown — edit it and JARVIS
 changes.
