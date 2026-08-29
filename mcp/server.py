@@ -450,6 +450,103 @@ def mute(target: str = "ALL", muted: bool = True) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------------------
+# Managing the room
+#
+# Everything the operator can do from the controller, so the presenter never has to reach
+# for a phone to do something they could have asked for.
+# ---------------------------------------------------------------------------------------
+
+
+@mcp.tool()
+def set_main(device: str) -> dict[str, Any]:
+    """Make a device the main one — the display showing the Command Wall.
+
+    "Make device two the main screen", "put the wall on Ravi's laptop". Only one device is
+    main at a time. It stays main if you later renumber it.
+    """
+    result = _call("/api/wall", {"device": device})
+    if result.get("error"):
+        return {"ok": False, "action": "set_main", "error": result["error"]}
+    return {"ok": True, "action": "set_main", "main": result.get("wall")}
+
+
+@mcp.tool()
+def renumber_device(device: str, to: int) -> dict[str, Any]:
+    """Change a device's number.
+
+    "Make Ravi's laptop device one", "swap two and three". Devices are numbered in the
+    order they joined, which is rarely the order the presenter wants to refer to them in.
+
+    If the destination number is taken, the two devices swap — nothing else in the room is
+    renumbered. Report the swap, because the other machine's number changed too and
+    somebody is relying on it.
+    """
+    result = _call("/api/renumber", {"device": device, "to": to})
+    if not result.get("ok"):
+        return {"ok": False, "action": "renumber", "error": result.get("error", "failed")}
+
+    summary: dict[str, Any] = {"ok": True, "action": "renumber", "device": result.get("to")}
+    if result.get("swappedWith"):
+        summary["swapped_with"] = result["swappedWith"]
+    return summary
+
+
+@mcp.tool()
+def forget_device(device: str) -> dict[str, Any]:
+    """Remove a device from the room entirely.
+
+    Use when a machine should not be here — someone joined by mistake, or a laptop has left
+    for good. It disconnects and disappears from the wall. If its agent is still running it
+    will simply rejoin, so this is housekeeping rather than a way to lock anyone out.
+    """
+    result = _call("/api/forget", {"device": device})
+    if result.get("error"):
+        return {"ok": False, "action": "forget", "error": result["error"]}
+    return {"ok": True, "action": "forget", "device": result.get("device")}
+
+
+@mcp.tool()
+def voice_status() -> dict[str, Any]:
+    """Report how your own voice is configured and whether it sounds good.
+
+    Worth checking if the presenter says you sound robotic. `natural` false means the
+    fallback synthesiser is in use and the fix is a GEMINI_API_KEY or a Piper install —
+    say that plainly rather than apologising for how you sound.
+    """
+    result = _call("/api/voice")
+    if result.get("error"):
+        return {"ok": False, "error": result["error"]}
+    return {
+        "ok": True,
+        "provider": result.get("provider"),
+        "voice": result.get("voice"),
+        "natural": result.get("natural"),
+        "audible": result.get("enabled"),
+        "budget_ms": result.get("budgetMs"),
+        "cached_lines": result.get("cached"),
+        "personality": (result.get("personality") or {}).get("name"),
+    }
+
+
+@mcp.tool()
+def overlay_url(device: str, scene: str | None = None) -> dict[str, Any]:
+    """Get a link that opens a device's JARVIS screen in any browser.
+
+    For when an overlay was closed by accident, or the presenter wants the Command Wall on
+    a second display. Issues no command and moves nothing, so it is safe mid-demo. The link
+    is single use and expires in a minute.
+    """
+    payload: dict[str, Any] = {"node": device}
+    if scene:
+        payload["scene"] = scene
+
+    result = _call("/api/overlay/url", payload)
+    if result.get("error"):
+        return {"ok": False, "error": result["error"]}
+    return {"ok": True, "device": result.get("node"), "url": result.get("url")}
+
+
 @mcp.tool()
 def reload_personality() -> dict[str, Any]:
     """Re-read the personality file after it has been edited.
