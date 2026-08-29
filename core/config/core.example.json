@@ -15,5 +15,24 @@
   "wifi": {
     "ssid": "JARVIS-NET",
     "passphrase": "gdg@essentials2026"
+  },
+
+  "_voice": "How JARVIS sounds. See scripts/warm-voice.sh — pre-generating the scripted lines is what makes a cloud voice safe to use live.",
+  "voice": {
+    "_comment": "How JARVIS sounds. provider 'auto' picks the most natural thing installed: gemini, then piper, then the platform's built-in. Cached lines need neither.",
+    "provider": "auto",
+    "_style": "Prepended to every line sent to Gemini. This is what makes delivery measured rather than chirpy \u2014 it is the single biggest lever on how JARVIS sounds.",
+    "style": "Speak calmly and with dry composure, in a refined British accent, unhurried and understated",
+    "gemini": {
+      "_comment": "Free tier. Get a key at aistudio.google.com. GEMINI_API_KEY in the environment works too and keeps it out of this file.",
+      "apiKey": "",
+      "model": "gemini-3.1-flash-tts-preview",
+      "_voice": "Charon is informative and measured. Kore is firmer. 30 to choose from.",
+      "voice": "Charon"
+    },
+    "piper": {
+      "_comment": "Local neural voice, no internet. pip install piper-tts, then download an en_GB onnx model and point this at it.",
+      "model": ""
+    }
   }
 }

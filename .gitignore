@@ -9,6 +9,10 @@ agent/config.json
 # drift is exactly what keeping one source avoids, so the generated one is not tracked.
 .agents/
 
+# Generated audio. Rebuilt by scripts/warm-voice.sh, and specific to whichever provider
+# and voice settings were active — not something to carry between machines.
+core/cache/
+
 # Runtime state
 core/logs/
 *.log

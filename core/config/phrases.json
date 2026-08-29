@@ -1,0 +1,31 @@
+{
+  "_comment": "Every line JARVIS is expected to say during the demo. Served at /api/phrases so the controller's buttons and scripts/warm-voice.sh cannot drift apart, and so warming the cache covers exactly what the demo will use. Keep them under about ten words — SPEC.md §31.",
+
+  "phrases": [
+    "Yes, sir.",
+    "All systems are online.",
+    "Identifying now.",
+    "Taking control.",
+    "Chrome is open, sir.",
+    "Moving across.",
+    "Splitting across all devices.",
+    "Reactor sequence engaged.",
+    "Releasing the room.",
+    "At once, sir.",
+    "Standing by.",
+    "That device is not responding.",
+    "The room is yours."
+  ],
+
+  "_counts": "Spoken answers to 'how many systems are online'. Warmed for one to eight so the count is instant however many people joined.",
+  "counts": [
+    "One authorized system is online.",
+    "Two authorized systems are online.",
+    "Three authorized systems are online.",
+    "Four authorized systems are online.",
+    "Five authorized systems are online.",
+    "Six authorized systems are online.",
+    "Seven authorized systems are online.",
+    "Eight authorized systems are online."
+  ]
+}
