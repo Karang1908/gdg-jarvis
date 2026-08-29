@@ -201,9 +201,17 @@ if [ "$INSTALL_AGENT" -eq 1 ] && [ "$PRINT_ONLY" -eq 0 ]; then
     cp "$SOURCE" "$AGENT_DIR/agent.md"
     ok "custom agent   $AGENT_DIR/agent.md"
 
+    # .agents/AGENTS.md is tracked in git, so a pull carries the persona to another
+    # machine without running anything. Rebuilt from personality.md + memory.md, which stay
+    # the source — commit it when you change them.
     mkdir -p "$REPO_ROOT/.agents"
-    cp "$SOURCE" "$REPO_ROOT/.agents/AGENTS.md"
-    ok "workspace      $REPO_ROOT/.agents/AGENTS.md"
+    node -e '
+      const p = require("./core/lib/personality.js");
+      const path = require("path");
+      p.load("core/config/personality.md", "core/config/memory.md");
+      require("fs").writeFileSync(".agents/AGENTS.md", p.get().body + "\n");
+    ' >/dev/null 2>&1 || cp "$SOURCE" "$REPO_ROOT/.agents/AGENTS.md"
+    ok "workspace      $REPO_ROOT/.agents/AGENTS.md (tracked in git)"
 
     WORDS=$(wc -w < "$SOURCE" | tr -d ' ')
     ok "$WORDS words — edit core/config/personality.md and run this again to update"

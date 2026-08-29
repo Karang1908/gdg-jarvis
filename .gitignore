@@ -5,10 +5,6 @@ core/config/*.bak
 agent/config.json
 .env
 
-# Generated from core/config/personality.md by scripts/install-mcp.sh. Two copies that can
-# drift is exactly what keeping one source avoids, so the generated one is not tracked.
-.agents/
-
 # Generated audio. Rebuilt by scripts/warm-voice.sh, and specific to whichever provider
 # and voice settings were active — not something to carry between machines.
 core/cache/
