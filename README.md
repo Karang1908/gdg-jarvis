@@ -127,17 +127,11 @@ piped from `curl` is not. See [D1](docs/DEVIATIONS.md#d1--zero-dependency-agents
 Open `http://10.42.0.1:3000/wall/` fullscreen on the display, and the controller on a
 phone. Both ask for `JARVIS_ADMIN_PASSWORD`.
 
-**On a phone, use the https address:**
+Plain http, one address, on the phone and everywhere else:
 
 ```
-https://10.42.0.1:3443/control/
+http://10.42.0.1:3000/control/
 ```
-
-Browsers only allow the microphone in a secure context — https, or localhost. Over plain
-`http://10.42.0.1:3000` the mic button will tell you so rather than silently hearing
-nothing. The certificate is self-signed and generated on first run, so accept the warning
-once. Everything except the microphone works over either address, and the agents keep
-using plain http so enrolment never hits a certificate error.
 
 To change any password: edit `.env`, restart Core. Changing `JARVIS_JOIN_SECRET` means
 teammates re-run their join line; changing the admin password means re-running
@@ -147,7 +141,7 @@ The controller carries two toggles that are easy to confuse, so they are worded 
 
 | | |
 | --- | --- |
-| **MIC** | Your microphone — the one in whatever device has this page open. The fixed commands ("take the room", "identify two") are matched in the browser and act instantly; anything else goes to the model, which reasons about it and calls the room's tools. |
+| **MIC** | The microphone **on the Kali machine** — not the one in the phone. This button opens and closes it remotely, and what Core hears appears on the phone as it hears it. |
 | **JARVIS AUDIBLE** | JARVIS's voice. Mutes speech without affecting anything else. |
 
 Tap a device and you can **set its number**, **make it main**, or forget it. Numbering is
@@ -263,25 +257,46 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
 ## How it works
 
 ```
-   KALI  ── ethernet / tethered phone ──→ internet (the model)
-   │
-   │   agy CLI ──→ MCP ──┐
-   │                     │ localhost
-   │   JARVIS's voice ───┤
-   │                     ▼
-   │                JARVIS CORE ──── 10.42.0.1
-   │                     │
-   └── Wi-Fi AP          │  SSE, one stream per device
-       JARVIS-NET  ┌─────┼─────┐
-                   ▼     ▼     ▼
-              device 1  dev 2  dev 3      ← numbered in join order
-               (agent) (agent) (agent)
-                   │     │     │
-                   ▼     ▼     ▼
-          fullscreen overlay, dedicated browser profile
-
-   CONTROLLER (any phone on JARVIS-NET) ──── HTTP ──→ Core
+   PHONE  /control/          the remote. no microphone, no recognition.
+     │                       its mic button toggles the microphone on Kali.
+     │  HTTP
+     ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  KALI          access point · core · brain                       │
+  │                                                                  │
+  │    MICROPHONE ──→ speech to text ──→ is it a fixed command?      │
+  │    (on Kali)          (whisper)         │           │            │
+  │                                     yes │           │ no         │
+  │                                         ▼           ▼            │
+  │                                    dispatch    agy CLI ──→ MCP   │
+  │                                         │           │            │
+  │                                         └─────┬─────┘            │
+  │                                               ▼                  │
+  │                                    JARVIS CORE ── 10.42.0.1      │
+  │                                    voice out ──→ speakers        │
+  └────────────────────────────┬─────────────────────────────────────┘
+                               │  SSE, one stream per device
+     Wi-Fi AP            ┌─────┼─────┐
+     JARVIS-NET          ▼     ▼     ▼
+                    device 1  dev 2  dev 3      ← numbered in join order
+                     (agent) (agent) (agent)
+                         │     │     │
+                         ▼     ▼     ▼
+                fullscreen overlay, dedicated browser profile
 ```
+
+Read it top to bottom: the phone controls Kali, and Kali controls the room. Nothing skips
+a tier.
+
+**The phone does not listen.** This is the one thing people get wrong, because the phone is
+the thing with a microphone in their hand. The microphone that matters is the one on the
+Kali laptop, next to the speakers and the model. The phone's mic button opens and closes
+*that* microphone, and what Core hears comes back to the phone to be displayed.
+
+That also means the room only needs one working microphone, positioned once, rather than
+depending on whichever phone happens to be in someone's pocket — and it is why the
+controller is served over plain http like everything else. A page that captures audio would
+need a secure context; a page with two buttons does not.
 
 Everything that thinks lives on Kali. The presenter's Mac is an ordinary device that
 happens to drive the projector — no dual-homing, no MCP, nothing to get wrong while
