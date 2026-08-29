@@ -114,6 +114,7 @@ function enroll(meta) {
       state: 'offline',
       hasOverlay: false,
       displayAwake: false,
+      hasInternet: null,
       rttMs: null,
       lastHeartbeatAt: null,
       heartbeatSeq: 0,
@@ -312,6 +313,7 @@ function heartbeat(number, fields) {
   if (fields.state) device.state = fields.state;
   if (fields.overlay !== undefined) device.hasOverlay = Boolean(fields.overlay);
   if (fields.awake !== undefined) device.displayAwake = Boolean(fields.awake);
+  if (fields.net !== undefined) device.hasInternet = Boolean(fields.net);
   if (fields.rtt !== undefined && Number.isFinite(fields.rtt)) device.rttMs = fields.rtt;
 
   return true;
@@ -449,6 +451,7 @@ function snapshot() {
         scene: device.scene,
         hasOverlay: device.hasOverlay,
         displayAwake: device.displayAwake,
+        hasInternet: device.hasInternet,
         muted: device.muted,
         rttMs: device.rttMs,
         silentForMs: silentFor,

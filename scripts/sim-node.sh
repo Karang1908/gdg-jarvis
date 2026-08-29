@@ -123,7 +123,7 @@ echo "sim \"$DEVICE_NAME\" is device $DEVICE_NUMBER ($NODE_OS)" >&2
     post /api/agent/heartbeat \
       "device=$DEVICE_NUMBER" "session=$SESSION" \
       "state=$([ "$overlay" = 1 ] && printf 'overlay' || printf 'ready')" \
-      "overlay=$overlay" "awake=1" "seq=$seq" "rtt=4" >/dev/null
+      "overlay=$overlay" "awake=1" "net=1" "seq=$seq" "rtt=4" >/dev/null
     seq=$((seq + 1))
     sleep 5
   done

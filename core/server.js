@@ -264,6 +264,7 @@ router.post('/api/agent/heartbeat', async (req, res) => {
     state: body.state,
     overlay: body.overlay === '1' || body.overlay === 1 || body.overlay === true,
     awake: body.awake === '1' || body.awake === 1 || body.awake === true,
+    net: body.net === undefined ? undefined : body.net === '1' || body.net === 1 || body.net === true,
     seq: body.seq !== undefined ? Number(body.seq) : undefined,
     rtt: body.rtt !== undefined ? Number(body.rtt) : undefined,
   });

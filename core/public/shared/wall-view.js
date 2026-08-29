@@ -121,6 +121,9 @@
       dot.className = 'dot online';
     }
 
+    // Only worth saying when it is false: a device that cannot open a link is the thing
+    // an operator needs to know before trying, not after.
+    if (device.hasInternet === false) status = status + ' · no internet';
     if (device.muted) status = status + ' · muted';
     if (device.isWall) status = 'main · ' + status;
 

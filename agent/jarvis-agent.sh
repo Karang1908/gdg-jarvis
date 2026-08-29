@@ -489,6 +489,40 @@ handle_command() {
 }
 
 # ---------------------------------------------------------------------------------------
+# Internet
+#
+# Whether *this* device can reach the internet, which is a different question from whether
+# it can reach Core. open_url on a device with no internet fails as a browser error page
+# nobody sees until it is on a projector, so the wall shows this before it is needed.
+#
+# Probed once a minute rather than every heartbeat: it is a network round trip, the answer
+# rarely changes, and twelve of them a minute per device would be rude to a tethered phone.
+# ---------------------------------------------------------------------------------------
+
+INTERNET_STATE=0
+INTERNET_CHECKED=0
+INTERNET_EVERY=60
+
+probe_internet() {
+  local now
+  now=$(date +%s)
+  if [ $((now - INTERNET_CHECKED)) -lt "$INTERNET_EVERY" ]; then
+    printf '%s' "$INTERNET_STATE"
+    return
+  fi
+  INTERNET_CHECKED=$now
+
+  # A 204 with no body is unambiguous; a 200 could be a captive portal telling us to log in.
+  if [ "$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' \
+        https://connectivitycheck.gstatic.com/generate_204 2>/dev/null)" = "204" ]; then
+    INTERNET_STATE=1
+  else
+    INTERNET_STATE=0
+  fi
+  printf '%s' "$INTERNET_STATE"
+}
+
+# ---------------------------------------------------------------------------------------
 # Heartbeat
 # ---------------------------------------------------------------------------------------
 
@@ -507,7 +541,7 @@ heartbeat_loop() {
     measured=$(post_timed /api/agent/heartbeat \
       "device=$DEVICE_NUMBER" "session=$SESSION_ID" \
       "state=$([ "$overlay_flag" = 1 ] && printf 'overlay' || printf 'ready')" \
-      "overlay=$overlay_flag" "awake=$(display_awake)" \
+      "overlay=$overlay_flag" "awake=$(display_awake)" "net=$(probe_internet)" \
       "seq=$seq" "rtt=$rtt")
 
     # Reported on the *next* heartbeat, since this one has already been sent.

@@ -267,9 +267,11 @@
         ? 'offline'
         : !device.displayAwake
           ? 'locked'
-          : device.muted
-            ? 'muted'
-            : device.hasOverlay
+          : device.hasInternet === false
+            ? 'no internet'
+            : device.muted
+              ? 'muted'
+              : device.hasOverlay
               ? device.scene
               : 'ready';
     });
