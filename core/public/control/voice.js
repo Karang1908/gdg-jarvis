@@ -194,10 +194,11 @@
         return;
       }
 
-      // Not a command. Reported rather than swallowed, so the presenter can see that the
-      // mic is live and simply did not recognise that phrasing — which is very different
-      // from the mic being dead.
-      handlers.heard(text, null);
+      // Not one of the fixed commands, so hand it to the model. This is the path that makes
+      // "which one is Ravi's, and put Chrome on it" work — the pattern list above exists to
+      // answer the scripted beats instantly, not to be the limit of what can be said.
+      handlers.heard(text, 'ask');
+      handlers.ask(text);
     }
 
     function build() {

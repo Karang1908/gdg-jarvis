@@ -20,6 +20,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
+const ask = require('./lib/ask');
 const env = require('./lib/env');
 const personality = require('./lib/personality');
 
@@ -127,6 +128,10 @@ try {
     });
   }
   personality.load(options.personality, options.memory);
+
+  // Runs from the repository root so agy picks up .agents/AGENTS.md as its persona.
+  ask.init({ cwd: path.join(__dirname, '..') });
+
   choreography.init(require(options.layout));
   registry.reset();
 } catch (err) {
@@ -555,6 +560,35 @@ router.post('/api/identify', async (req, res, context) => {
 });
 
 /**
+ * Put a sentence to the model.
+ *
+ * The far end of the microphone. The controller recognises the fixed demo commands itself
+ * and dispatches them instantly; anything else arrives here, goes to agy, and comes back
+ * having called whatever MCP tools it decided on.
+ *
+ * The answer is spoken as well as returned — the presenter is holding a phone, not reading
+ * it — but only if the model did not already speak for itself through the speak tool, which
+ * is the usual case and would otherwise say everything twice.
+ */
+router.post('/api/ask', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const before = voice.describe().usage;
+  const spokenBefore = before.calls + before.saved;
+
+  const result = await ask.ask(body.text);
+
+  const after = voice.describe().usage;
+  if (result.ok && result.answer && after.calls + after.saved === spokenBefore) {
+    commands.speakAsJarvis(result.answer, { source: 'ask' });
+  }
+
+  json(res, 200, result);
+});
+
+/**
  * Speak.
  *
  * Defaults to JARVIS's own voice on this machine rather than to any device. Passing an
@@ -606,7 +640,12 @@ router.get('/api/phrases', (req, res, context) => {
 /** What JARVIS's voice is doing, and the personality it is running. */
 router.get('/api/voice', (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
-  json(res, 200, { ok: true, ...voice.describe(), personality: personality.summary() });
+  json(res, 200, {
+    ok: true,
+    ...voice.describe(),
+    personality: personality.summary(),
+    ask: ask.describe(),
+  });
 });
 
 /**

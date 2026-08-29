@@ -481,6 +481,31 @@
         voiceHeard.className = 'voice-heard is-interim';
         voiceHeard.textContent = text;
       },
+      /**
+       * Hand a sentence to the model.
+       *
+       * Deliberately slow-looking. agy takes several seconds and calls tools while it
+       * thinks, so the presenter needs to see that something is happening rather than
+       * wonder whether the mic heard them at all.
+       */
+      ask: function (text) {
+        report('thinking…', 'warn');
+        JarvisSession.api('/api/ask', { text: text })
+          .then(function (result) {
+            var data = (result && result.data) || {};
+            if (data.ok) {
+              report(data.answer ? 'JARVIS: “' + data.answer + '”' : 'done', 'ok');
+            } else if (data.error === 'agy_not_installed') {
+              report('no Antigravity here — that phrasing needs the model', 'warn');
+            } else {
+              report('the model could not answer: ' + (data.detail || data.error || 'unknown'), 'bad');
+            }
+          })
+          .catch(function () {
+            report('CORE UNREACHABLE', 'bad');
+          });
+      },
+
       heard: function (text, intent) {
         // Showing what was heard even when nothing matched is what tells the presenter the
         // mic is live but the phrasing was not recognised — very different from a dead mic.
