@@ -287,34 +287,78 @@
    * says out loud that the endpoints enrolled themselves.
    * ------------------------------------------------------------------------------- */
 
-  var ARCHITECTURE = [
-    { label: 'VOICE', note: 'presenter' },
-    { label: 'LLM', note: 'natural language' },
-    { label: 'MCP', note: 'tool calls' },
-    { label: 'JARVIS CORE', note: 'registry + command bus' },
-    { label: 'DEVICE AGENTS', note: 'enrolled, authenticated' },
-    { label: 'OPERATING SYSTEM', note: 'allowlisted actions only' },
+  /**
+   * What is actually wired to what.
+   *
+   * Worth drawing accurately, because the obvious guess about this system is wrong. People
+   * assume the phone listens — it is the thing with a microphone in their hand. It does not.
+   * The phone is a remote: the one button that matters on it opens and closes a microphone
+   * that lives on the Kali machine.
+   *
+   * Everything happens on that machine. It is the access point the room joined, it hears,
+   * it transcribes, it decides, it speaks, and it is the only thing the enrolled laptops
+   * ever take orders from. Three tiers, one direction.
+   */
+  var CORE_CHAIN = [
+    { step: 'MICROPHONE', note: 'on this machine' },
+    { step: 'SPEECH → TEXT', note: 'whisper, local' },
+    { step: 'INTENT  ·  else  AGY → MCP', note: 'instant, or reasoned' },
+    { step: 'COMMAND BUS  ·  VOICE OUT', note: 'to the room, and aloud' },
   ];
 
   function sceneNetwork(root) {
     clear(root);
-    var stage = el('div', 'stack-stage');
+    var stage = el('div', 'topology');
+    var beat = 0;
 
-    ARCHITECTURE.forEach(function (layer, index) {
-      var row = el('div', 'stack-row');
-      row.style.animationDelay = index * 120 + 'ms';
-      row.appendChild(el('div', 'stack-label', layer.label));
-      row.appendChild(el('div', 'stack-note', layer.note));
-      stage.appendChild(row);
+    /** Each tier fades in after the one above, so the direction of control reads itself. */
+    function timed(node, extra) {
+      node.style.animationDelay = beat * 150 + (extra || 0) + 'ms';
+      beat += 1;
+      return node;
+    }
 
-      if (index < ARCHITECTURE.length - 1) {
-        var arrow = el('div', 'stack-arrow', '↓');
-        arrow.style.animationDelay = index * 120 + 60 + 'ms';
-        stage.appendChild(arrow);
-      }
+    // The remote.
+    var phone = timed(el('div', 'topo-box topo-phone'));
+    phone.appendChild(el('div', 'topo-title', 'PHONE'));
+    phone.appendChild(el('div', 'topo-sub', '/control/'));
+    phone.appendChild(el('div', 'topo-role', 'remote only — no microphone'));
+    stage.appendChild(phone);
+
+    stage.appendChild(timed(el('div', 'topo-link', '↓')));
+    stage.appendChild(timed(el('div', 'topo-link-note', 'mic on / off  ·  commands'), -80));
+
+    // Everything that thinks.
+    var core = timed(el('div', 'topo-box topo-core'));
+    core.appendChild(el('div', 'topo-title', 'KALI'));
+    core.appendChild(el('div', 'topo-sub', 'access point  ·  core  ·  brain'));
+
+    var chain = el('div', 'topo-chain');
+    CORE_CHAIN.forEach(function (link, index) {
+      var row = timed(el('div', 'topo-chain-row'), 60);
+      row.appendChild(el('div', 'topo-step', link.step));
+      row.appendChild(el('div', 'topo-step-note', link.note));
+      chain.appendChild(row);
+      if (index < CORE_CHAIN.length - 1) chain.appendChild(el('div', 'topo-chain-arrow', '↓'));
     });
+    core.appendChild(chain);
+    stage.appendChild(core);
 
-    stage.appendChild(el('div', 'stack-footer', 'every endpoint voluntarily enrolled'));
+    stage.appendChild(timed(el('div', 'topo-link', '↓')));
+    stage.appendChild(timed(el('div', 'topo-link-note', 'server-sent events  ·  enrolled devices'), -80));
+
+    // The room. Three is the shape of the fan, not a claim about how many joined.
+    var fan = el('div', 'topo-fan');
+    ['1', '2', '3'].forEach(function (number) {
+      var device = timed(el('div', 'topo-box topo-device'), 40);
+      device.appendChild(el('div', 'topo-title', 'DEVICE ' + number));
+      device.appendChild(el('div', 'topo-role', 'agent  ·  screen'));
+      fan.appendChild(device);
+    });
+    stage.appendChild(fan);
+
+    stage.appendChild(timed(el('div', 'topo-footer', 'one microphone. it is not the phone.'), 120));
+
     root.appendChild(stage);
     return null;
   }
