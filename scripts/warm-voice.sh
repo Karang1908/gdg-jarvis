@@ -76,6 +76,15 @@ if [ "$MODE" = "test" ]; then
       ? `audio player: ${state.player}`
       : "audio player: none (this is separate from whether your speakers work)");
 
+    if (state.root) {
+      console.log("");
+      console.log("  \x1b[33m!\x1b[0m you are running this as root.");
+      console.log("     PulseAudio and PipeWire are per-user daemons, so root usually cannot");
+      console.log("     reach the sound server no matter how loud the speakers are.");
+      console.log("     Run it as yourself:   scripts/warm-voice.sh --test");
+      console.log("     Core does not need root either — only the network setup does.");
+    }
+
     if (!state.available) {
       console.log("");
       console.log("  JARVIS will be silent. Fix whichever is marked above:");
@@ -104,17 +113,52 @@ if [ "$MODE" = "test" ]; then
       if (result.ok) {
         console.log(`  \x1b[32m✓\x1b[0m played via ${result.source} in ${ms}ms`);
         console.log("");
-        console.log("  Heard nothing? The command worked, so it is the audio route, not JARVIS:");
-        console.log("    - over SSH there is no audio session; run this at the machine itself");
-        console.log("    - check the output device and volume:  pactl list short sinks");
-        console.log("    - as root, PulseAudio often belongs to the desktop user instead");
+        console.log("  Heard nothing? The player exited cleanly, so it believes it played.");
+        console.log("  In order of likelihood:");
+        console.log("    1. you are root — run it as your normal user instead");
+        console.log("    2. it went to the wrong output:   pactl list short sinks");
+        console.log("       set one:                       pactl set-default-sink <name>");
+        console.log("    3. no sound card at all (a VM):   aplay -l");
+        console.log("    4. over SSH there is no audio session; use the machine directly");
       } else {
+        // The player told us why. Repeating it verbatim beats any guess we could make.
         console.log(`  \x1b[31m✗\x1b[0m could not speak: ${result.error}`);
+        if (result.detail) console.log(`     ${result.player || "it"} said: ${result.detail}`);
+
+        if (/refused|connect|server|pulse/i.test(result.detail || "")) {
+          console.log("");
+          console.log("  That is the sound server refusing the connection, not a broken speaker.");
+          console.log("    - if you used sudo, do not: run it as your normal user");
+          console.log("    - otherwise check it is running:  systemctl --user status pulseaudio pipewire");
+        }
         process.exit(1);
       }
     })();
   '
   STATUS=$?
+
+  # Whatever happened above, report what the system thinks it has. A VM with no emulated
+  # sound card produces exactly the same symptom as a routing problem, and only this tells
+  # them apart.
+  bold ""
+  bold "What this machine has"
+  if command -v aplay >/dev/null 2>&1; then
+    if aplay -l 2>/dev/null | grep -q '^card'; then
+      aplay -l 2>/dev/null | grep '^card' | sed 's/^/    /'
+    else
+      bad "ALSA reports no sound card — if this is a VM, enable audio in its settings"
+    fi
+  fi
+  if command -v pactl >/dev/null 2>&1; then
+    SINKS=$(pactl list short sinks 2>/dev/null)
+    if [ -n "$SINKS" ]; then
+      printf '%s\n' "$SINKS" | awk '{print "    sink: " $2 "  (" $NF ")"}'
+    else
+      bad "no PulseAudio sinks — the sound server is not reachable from this session"
+      warn "  as root this is expected; run as your normal user"
+    fi
+  fi
+
   printf '\n'
   exit $STATUS
 fi

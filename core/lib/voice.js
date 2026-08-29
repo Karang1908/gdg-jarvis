@@ -373,14 +373,34 @@ function isCached(text) {
 
 const PLAYERS = [
   { command: 'afplay', args: (file) => [file] },
-  { command: 'paplay', args: (file) => [file] },
+  { command: 'paplay', args: (file) => [file], needsUserSession: true },
   { command: 'aplay', args: (file) => ['-q', file] },
-  { command: 'mpv', args: (file) => ['--no-video', '--really-quiet', file] },
+  { command: 'mpv', args: (file) => ['--no-video', '--really-quiet', file], needsUserSession: true },
   { command: 'ffplay', args: (file) => ['-nodisp', '-autoexit', '-loglevel', 'quiet', file] },
 ];
 
+/** Running as root, where a per-user audio daemon is usually out of reach. */
+function isRoot() {
+  return typeof process.getuid === 'function' && process.getuid() === 0;
+}
+
+/**
+ * Pick something that can actually make a noise here.
+ *
+ * PulseAudio and PipeWire are per-user daemons. Running as root — which is easy to end up
+ * doing, since the setup script needs sudo for the network — means paplay has no session to
+ * connect to and fails with "Connection refused" no matter how loud the speakers are.
+ * ALSA does not care, so as root it is tried first.
+ *
+ * The right answer is still to run Core as a normal user; this only stops the common
+ * mistake from being silent.
+ */
 function findPlayer() {
-  return PLAYERS.find((candidate) => have(candidate.command)) || null;
+  const candidates = isRoot()
+    ? [...PLAYERS].sort((a, b) => Number(Boolean(a.needsUserSession)) - Number(Boolean(b.needsUserSession)))
+    : PLAYERS;
+
+  return candidates.find((candidate) => have(candidate.command)) || null;
 }
 
 /* ------------------------------------------------------------------------------------
@@ -465,6 +485,15 @@ function init(options = {}) {
   chain = usable;
   const primary = chain[0];
 
+  if (isRoot()) {
+    // Worth saying every time. Audio failing under sudo looks like broken hardware, and
+    // the fix — do not use sudo — is not one anybody guesses.
+    log.warn('running as root; audio often fails because PulseAudio belongs to your user', {
+      using: player ? player.command : 'none',
+      fix: 'run Core as your normal user, not with sudo',
+    });
+  }
+
   log.good('voice ready', {
     using: primary,
     fallbacks: chain.slice(1).join(' ') || 'none',
@@ -495,6 +524,7 @@ function describe() {
     // Reported separately because they fail for unrelated reasons and have different fixes.
     hasSynth: PREFERENCE.some((name) => PROVIDERS[name] && PROVIDERS[name].available()),
     hasPlayer: Boolean(player),
+    root: isRoot(),
     provider: chain[0] || null,
     fallbacks: chain.slice(1),
     natural: chain[0] === 'gemini' || chain[0] === 'piper',
@@ -516,16 +546,34 @@ function describe() {
  * Speaking
  * --------------------------------------------------------------------------------- */
 
+/**
+ * Play a file, and actually notice whether it worked.
+ *
+ * The exit code is the whole point. An earlier version reported success on any exit, so a
+ * player that died with "Connection refused" — the normal outcome of running as root while
+ * PulseAudio belongs to the desktop user — was indistinguishable from one that made a
+ * noise. That turns a five-second fix into an unfalsifiable mystery.
+ *
+ * stderr is captured for the same reason: the player already knows exactly what is wrong
+ * and says so, and discarding that was throwing away the answer.
+ */
 function play(file, startedAt) {
   return new Promise((resolve) => {
     const spawnedAt = Date.now();
-    const child = spawn(player.command, player.args(file), { stdio: 'ignore' });
+    const child = spawn(player.command, player.args(file), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
     current = child;
 
     // The player has the file open and is about to make a noise. Close enough to
     // "first sound" to be the number worth reporting, and far more useful than the
     // moment the audio *finishes*, which is dominated by how long the line is.
     const firstSoundMs = startedAt ? spawnedAt - startedAt : null;
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < 2000) stderr += chunk;
+    });
 
     const done = (result) => {
       if (current === child) current = null;
@@ -544,15 +592,39 @@ function play(file, startedAt) {
     guard.unref();
 
     child.on('error', (err) => done({ ok: false, error: err.message }));
-    child.on('exit', () => done({ ok: true, firstSoundMs }));
+
+    child.on('exit', (code, signal) => {
+      if (code === 0) return done({ ok: true, firstSoundMs });
+
+      const detail = stderr.trim().split('\n').filter(Boolean).pop() || '';
+      log.error('audio player failed', {
+        player: player.command,
+        exit: code === null ? signal : code,
+        ...(detail ? { said: detail.slice(0, 160) } : {}),
+      });
+      done({
+        ok: false,
+        error: 'playback_failed',
+        player: player.command,
+        exit: code,
+        detail: detail.slice(0, 200),
+      });
+    });
   });
 }
 
 function speakDirect(name, text) {
   const provider = PROVIDERS[name];
   return new Promise((resolve) => {
-    const child = spawn(provider.command, provider.args(text), { stdio: 'ignore' });
+    const child = spawn(provider.command, provider.args(text), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
     current = child;
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < 2000) stderr += chunk;
+    });
 
     const done = (result) => {
       if (current === child) current = null;
@@ -571,7 +643,18 @@ function speakDirect(name, text) {
     guard.unref();
 
     child.on('error', (err) => done({ ok: false, error: err.message }));
-    child.on('exit', () => done({ ok: true }));
+
+    child.on('exit', (code, signal) => {
+      if (code === 0) return done({ ok: true });
+
+      const detail = stderr.trim().split('\n').filter(Boolean).pop() || '';
+      log.error('speech command failed', {
+        command: provider.command,
+        exit: code === null ? signal : code,
+        ...(detail ? { said: detail.slice(0, 160) } : {}),
+      });
+      done({ ok: false, error: 'speech_failed', detail: detail.slice(0, 200) });
+    });
   });
 }
 
