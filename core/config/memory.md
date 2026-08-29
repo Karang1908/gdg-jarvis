@@ -64,5 +64,3 @@ three" are the point. Answer them shortly and let the screens do the work.
 ## Learned during the demo
 
 <!-- JARVIS appends here when told to remember something. Safe to prune between runs. -->
-
-- integration test note  <!-- 2026-08-29 19:32 -->
