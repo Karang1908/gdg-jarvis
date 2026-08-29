@@ -361,6 +361,19 @@ async function heartbeat(device, extra = {}) {
   check('an empty utterance is refused',
     (await api('POST', '/api/utterance', { text: '   ' })).data.error === 'empty');
 
+  // The gate. The microphone stays open while the presenter talks to a room, so speech that
+  // is not addressed to JARVIS must not become a model call — each one takes twelve seconds
+  // or more, can reach for the room's tools, and speaks its answer over the presenter.
+  const aside = await api('POST', '/api/utterance', { text: 'so anyway MQTT is a lightweight protocol' });
+  check('speech not addressed to JARVIS never reaches the model',
+    aside.data.ignored === true && aside.data.reason === 'not_addressed' && !aside.data.viaModel,
+    JSON.stringify(aside.data).slice(0, 160));
+
+  // But a fixed command still needs no wake word — "take the room" has to work bare.
+  const bare = await api('POST', '/api/utterance', { text: 'take the room' });
+  check('a fixed command still works without being addressed',
+    bare.data.matched === 'takeover_all', JSON.stringify(bare.data).slice(0, 160));
+
   check('the microphone needs the admin password',
     (await api('POST', '/api/mic', { on: true }, null)).status === 401);
 
