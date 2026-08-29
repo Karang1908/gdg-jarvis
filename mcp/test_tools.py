@@ -93,6 +93,15 @@ async def main() -> int:
     voice = call(mod, "voice_status")
     check("voice_status reports the provider", voice.get("ok") and "provider" in voice, json.dumps(voice)[:200])
 
+    # The microphone belongs to Core, so the model can ask about it and close it. Reading
+    # the state is asserted; whether this machine has recording hardware is not the test's
+    # business, so `listening` is only required to agree with `available`.
+    mic = call(mod, "microphone")
+    check("microphone reports its own state",
+          mic.get("ok") and mic.get("listening") == mic.get("available"), json.dumps(mic)[:200])
+    check("microphone can be closed",
+          call(mod, "microphone", on=False).get("listening") is False, json.dumps(mic)[:200])
+
     print("\nCommanding")
 
     def reached(name: str, result: dict, wanted: int) -> None:
