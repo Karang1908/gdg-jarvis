@@ -569,15 +569,21 @@ router.post('/api/identify', async (req, res, context) => {
  * to the model. Shared by the microphone and by any client that wants to send a sentence,
  * so both take exactly the same path.
  */
+let thinking = false;
+
 async function handleUtterance(text, source) {
   const heard = String(text || '').trim();
   if (!heard) return { ok: false, error: 'empty' };
 
-  observers.broadcast('heard', { text: heard, at: Date.now(), source });
-
   // resolve rather than has, so "identify ravi" works as well as "identify two" — has only
   // understands numbers, and a spoken hostname is the natural way to refer to a teammate.
   const intent = intents.match(heard, (device) => registry.resolve(device).ok);
+
+  // Say what is about to happen with it, so the phone can show the difference between a
+  // command, a question being thought about, and speech that was simply not for JARVIS.
+  // A live microphone that ignores you must never look like a dead one.
+  const status = intent ? 'command' : intents.addressed(heard) ? 'thinking' : 'ignored';
+  observers.broadcast('heard', { text: heard, at: Date.now(), source, status });
 
   if (intent) {
     if (intent.answer === 'count') {
@@ -597,11 +603,29 @@ async function handleUtterance(text, source) {
     return { ok: true, matched: intent.name, label: intent.label, ...result };
   }
 
+  // Not a fixed command. The model only gets it if it was addressed to JARVIS — the
+  // microphone is open while the presenter talks to an audience, and without this every
+  // sentence of the talk became a model call that could reach for the room's tools.
+  if (status === 'ignored') {
+    return { ok: true, ignored: true, reason: 'not_addressed', heard };
+  }
+
+  // One at a time. ears.js no longer waits for this to finish before listening again, so
+  // without a guard a run of questions would start a pile of concurrent agy processes on
+  // the machine that is also driving the room.
+  if (thinking) {
+    log.info('still thinking; ignoring', { heard: heard.slice(0, 80) });
+    return { ok: false, error: 'busy', heard };
+  }
+  thinking = true;
+
   // Not one of the fixed commands, so let the model reason about it.
   const before = voice.describe().usage;
   const spokenBefore = before.calls + before.saved;
 
-  const answered = await ask.ask(heard);
+  const answered = await ask.ask(heard).finally(() => {
+    thinking = false;
+  });
 
   // The model can speak for itself through the MCP speak tool. Reading the usage counter is
   // how we tell — anything else would say the answer twice.
