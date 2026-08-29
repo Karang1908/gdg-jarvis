@@ -523,6 +523,17 @@
     paintPanel();
   }
 
+  /** Drop a token Core has rejected and go back to the sign-in. */
+  function signOut(message) {
+    JarvisSession.clear();
+    consoleEl.hidden = true;
+    voiceSection.hidden = true;
+    releaseAll.hidden = true;
+    gate.hidden = false;
+    gateError.textContent = message;
+    gateError.hidden = false;
+  }
+
   function begin() {
     gate.hidden = true;
     consoleEl.hidden = false;
@@ -540,10 +551,19 @@
         return JarvisSession.api('/api/devices');
       })
       .then(function (result) {
-        if (!result.ok) return;
+        // A stored token that Core no longer accepts — most often because the secrets were
+        // regenerated between rehearsals. Without this the console appears, stays empty,
+        // and explains nothing, which looks like the room is broken rather than like a
+        // sign-in that needs doing again.
+        if (result && result.status === 401) return signOut('SESSION EXPIRED — sign in again');
+        if (!result.ok) return report('could not read the room from Core', 'bad');
+
         apps = result.data.apps || [];
         buildChips();
         applySnapshot(result.data);
+      })
+      .catch(function () {
+        report('CORE UNREACHABLE', 'bad');
       });
 
     JarvisStream.connect({
