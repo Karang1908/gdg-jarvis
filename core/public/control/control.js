@@ -41,7 +41,6 @@
   var snapshot = null;
   var apps = [];
   var chipsBuilt = false;
-  var voice = null;
 
   /* ----------------------------------------------------------------------------------
    * Scenes and phrases
@@ -434,6 +433,9 @@
    * Microphone
    * ------------------------------------------------------------------------------- */
 
+  var micOn = false;
+  var warnedFixedWindow = false;
+
   function micState(state, reason) {
     micButton.classList.remove('is-on', 'is-denied', 'is-unavailable');
     micButton.setAttribute('aria-pressed', String(state === 'listening'));
@@ -441,6 +443,8 @@
     if (state === 'listening') {
       micButton.classList.add('is-on');
       micLabel.textContent = 'LISTENING';
+    } else if (state === 'starting') {
+      micLabel.textContent = 'OPENING\u2026';
     } else if (state === 'denied') {
       micButton.classList.add('is-denied');
       micLabel.textContent = 'MIC BLOCKED';
@@ -457,78 +461,77 @@
     }
   }
 
+  /**
+   * The mic button.
+   *
+   * It does not open a microphone. The microphone is on the Kali machine, next to the
+   * speakers and the model — this button asks Core to open or close it, and Core reports
+   * back what it heard over the event stream.
+   *
+   * That is the whole point of the phone: it is a remote, not an ear. Recognition here
+   * would mean the phone had to be a secure context, had to have Chrome's cloud
+   * recogniser, and had to be near enough to the speaker to hear them.
+   */
   function setupVoice() {
-    voice = JarvisVoice.create({
-      post: function (path, body, verb) {
-        return send(path, body, verb);
-      },
-      speak: function (text) {
-        return send('/api/speak', { text: text }, 'SPEAK');
-      },
-      target: function () {
-        return target;
-      },
-      onlineCount: function () {
-        return (snapshot && snapshot.summary && snapshot.summary.online) || 0;
-      },
-      deviceExists: function (number) {
-        return Boolean(deviceByNumber(number));
-      },
-      hostnameExists: function (word) {
-        var needle = String(word).toLowerCase();
-        return devices().some(function (d) {
-          return (d.hostname || '').toLowerCase().indexOf(needle) !== -1;
-        });
-      },
-      interim: function (text) {
-        voiceHeard.className = 'voice-heard is-interim';
-        voiceHeard.textContent = text;
-      },
-      /**
-       * Hand a sentence to the model.
-       *
-       * Deliberately slow-looking. agy takes several seconds and calls tools while it
-       * thinks, so the presenter needs to see that something is happening rather than
-       * wonder whether the mic heard them at all.
-       */
-      ask: function (text) {
-        report('thinking…', 'warn');
-        JarvisSession.api('/api/ask', { text: text })
-          .then(function (result) {
-            var data = (result && result.data) || {};
-            if (data.ok) {
-              report(data.answer ? 'JARVIS: “' + data.answer + '”' : 'done', 'ok');
-            } else if (data.error === 'agy_not_installed') {
-              report('no Antigravity here — that phrasing needs the model', 'warn');
-            } else {
-              report('the model could not answer: ' + (data.detail || data.error || 'unknown'), 'bad');
-            }
-          })
-          .catch(function () {
-            report('CORE UNREACHABLE', 'bad');
-          });
-      },
+    micButton.addEventListener('click', function () {
+      var turningOn = !micOn;
+      micState(turningOn ? 'starting' : 'off');
 
-      heard: function (text, intent) {
-        // Showing what was heard even when nothing matched is what tells the presenter the
-        // mic is live but the phrasing was not recognised — very different from a dead mic.
-        voiceHeard.className = 'voice-heard' + (intent ? ' is-command' : ' is-ignored');
-        voiceHeard.textContent = intent ? '“' + text + '”' : '“' + text + '” — not a command';
-      },
-      report: report,
-      state: micState,
+      JarvisSession.api('/api/mic', { on: turningOn })
+        .then(function (result) {
+          var data = (result && result.data) || {};
+          applyMic(data);
+
+          if (turningOn && !data.available) {
+            report(micProblem(data), 'warn');
+          }
+        })
+        .catch(function () {
+          micState('off');
+          report('CORE UNREACHABLE', 'bad');
+        });
     });
 
-    if (!voice.available) {
-      micState('unavailable', voice.unavailable);
-      micButton.disabled = true;
+    // The mic may already be open — Core keeps listening across a phone reconnecting, and
+    // the button has to show that rather than claim the room is deaf.
+    // No body at all — api() sends GET only when body is undefined, and a POST of {} here
+    // would read as "on: false" and switch the microphone off every time a phone reconnects.
+    JarvisSession.api('/api/mic')
+      .then(function (result) {
+        applyMic((result && result.data) || {});
+      })
+      .catch(function () {});
+  }
+
+  /** Which half is missing, so the fix is the right one. */
+  function micProblem(data) {
+    if (!data.capture) return 'the Kali machine has no way to record — install sox on it';
+    if (!data.transcribe) return 'the Kali machine cannot transcribe — set GEMINI_API_KEY on it';
+    return 'the microphone on the Kali machine is unavailable';
+  }
+
+  function applyMic(data) {
+    micOn = Boolean(data.listening);
+
+    if (!data.available) {
+      micState('unavailable', { short: 'NO MIC' });
       return;
     }
+    micState(micOn ? 'listening' : 'off');
 
-    micButton.addEventListener('click', function () {
-      if (voice.isOn()) voice.stop();
-      else voice.start();
-    });
+    // Fixed-window capture has no silence detection, so it records in blocks rather than
+    // stopping when the speaker does. Worth saying once — it feels broken otherwise.
+    if (micOn && data.fixedWindow && !warnedFixedWindow) {
+      warnedFixedWindow = true;
+      report('no silence detection on Core — speak in short bursts, or install sox there', 'warn');
+    }
+  }
+
+  /** What Core heard, pushed over the event stream as it hears it. */
+  function showHeard(event) {
+    if (!event || !event.text) return;
+    voiceHeard.className = 'voice-heard is-command';
+    voiceHeard.textContent = '\u201c' + event.text + '\u201d';
   }
 
   /* ----------------------------------------------------------------------------------
@@ -599,7 +602,7 @@
     JarvisStream.connect({
       resolveUrl: JarvisSession.eventStreamUrl,
       onStatus: linkState,
-      on: { state: applySnapshot },
+      on: { state: applySnapshot, heard: showHeard },
     });
 
     wireActions();
