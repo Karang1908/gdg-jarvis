@@ -141,7 +141,7 @@ The controller carries two toggles that are easy to confuse, so they are worded 
 
 | | |
 | --- | --- |
-| **MIC** | The microphone **on the Kali machine** — not the one in the phone. This button opens and closes it remotely, and what Core hears appears on the phone as it hears it. |
+| **MIC** | The microphone **on the Kali machine** — not the one in the phone. This button opens and closes it remotely, and what Core hears appears on the phone with what became of it. |
 | **JARVIS AUDIBLE** | JARVIS's voice. Mutes speech without affecting anything else. |
 
 Tap a device and you can **set its number**, **make it main**, or forget it. Numbering is
@@ -287,6 +287,12 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
 
 Read it top to bottom: the phone controls Kali, and Kali controls the room. Nothing skips
 a tier.
+
+**Fixed commands are bare; questions need the name.** "Take the room", "identify two",
+"show me the architecture" work as spoken, and are matched on Core in microseconds. Anything
+else only reaches the model if you *start* by addressing it — "JARVIS, which one is Ravi's?"
+Without that, every sentence of your talk would become a twelve-second model call with its
+answer read out over you.
 
 **The phone does not listen.** This is the one thing people get wrong, because the phone is
 the thing with a microphone in their hand. The microphone that matters is the one on the
