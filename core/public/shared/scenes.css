@@ -346,14 +346,14 @@
  * Architecture stack
  * ----------------------------------------------------------------------------------- */
 
-.stack-stage {
+.topology {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.4vh;
+  gap: 0.5vh;
 }
 
-.stack-row {
+.topo-box {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -361,34 +361,101 @@
   padding: 1vh 3vw;
   border: 1px solid var(--cyan-ghost);
   background: var(--panel);
-  min-width: min(46vw, 620px);
   animation: sweep-in 520ms ease-out both;
 }
 
-.stack-label {
-  font-size: clamp(15px, 1.9vw, 30px);
+.topo-title {
+  font-size: clamp(14px, 1.7vw, 27px);
   letter-spacing: var(--trace);
   color: var(--cyan-bright);
 }
 
-.stack-note {
-  font-size: clamp(10px, 0.95vw, 15px);
+.topo-sub,
+.topo-role {
+  font-size: clamp(9px, 0.9vw, 14px);
   letter-spacing: 0.16em;
   color: var(--ink-faint);
 }
 
-.stack-arrow {
+/* The one thing a viewer is most likely to have wrong, so it is the one thing in amber. */
+.topo-phone .topo-role {
+  color: var(--amber);
+}
+
+/* Core is the subject of the diagram; the heavier border is the point being made. */
+.topo-core {
+  border: 2px solid var(--cyan-bright);
+  min-width: min(60vw, 760px);
+  padding: 1.4vh 3vw;
+}
+
+.topo-chain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2vh;
+  margin-top: 0.9vh;
+  padding-top: 0.9vh;
+  border-top: 1px solid var(--cyan-ghost);
+  width: 100%;
+}
+
+.topo-chain-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: sweep-in 460ms ease-out both;
+}
+
+.topo-step {
+  font-size: clamp(11px, 1.15vw, 19px);
+  letter-spacing: 0.2em;
+  color: var(--cyan);
+}
+
+.topo-step-note {
+  font-size: clamp(8px, 0.78vw, 12px);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+
+.topo-chain-arrow {
+  color: var(--cyan-dim);
+  font-size: clamp(10px, 1vw, 15px);
+  line-height: 1.1;
+}
+
+.topo-link {
   color: var(--cyan-dim);
   font-size: clamp(14px, 1.4vw, 22px);
   animation: sweep-in 400ms ease-out both;
 }
 
-.stack-footer {
-  margin-top: 2.4vh;
+.topo-link-note {
+  font-size: clamp(8px, 0.8vw, 13px);
+  letter-spacing: 0.2em;
+  color: var(--ink-faint);
+  animation: sweep-in 400ms ease-out both;
+}
+
+.topo-fan {
+  display: flex;
+  gap: 1.6vw;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.topo-device {
+  min-width: min(16vw, 190px);
+}
+
+.topo-footer {
+  margin-top: 2vh;
   font-size: clamp(11px, 1.1vw, 18px);
   letter-spacing: 0.28em;
   color: var(--amber);
   text-transform: uppercase;
+  animation: sweep-in 520ms ease-out both;
 }
 
 /* --------------------------------------------------------------------------------------
