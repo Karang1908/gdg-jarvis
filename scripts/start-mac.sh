@@ -191,7 +191,8 @@ fi
 bold ""
 bold "Open these"
 printf '\n'
-printf '  control   %s/control/     ← phone, or a second window\n' "$CORE_URL"
+printf '  control   %s/control/     ← second window on this Mac\n' "$CORE_URL"
+printf '  mic       %s/control/     ← use THIS one on a phone\n' "$(printf '%s' "$CORE_URL" | sed 's|^http://|https://|; s|:[0-9]*$|:3443|')"
 printf '  wall      %s/wall/        ← optional; MAIN already becomes the wall\n' "$CORE_URL"
 printf '\n'
 printf '  admin token (paste into either page):\n'

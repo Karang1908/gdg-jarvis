@@ -413,6 +413,15 @@ bold ""
 bold "Operator"
 printf '\n    wall     http://%s:3000/wall/\n' "$CORE_IP"
 printf '    control  http://%s:3000/control/\n' "$CORE_IP"
+printf '\n'
+printf '    On a phone, use the https address instead — browsers only allow the\n'
+printf '    microphone over https or on localhost:\n'
+printf '\n'
+printf '      \033[1mhttps://%s:3443/control/\033[0m\n' "$CORE_IP"
+printf '\n'
+printf '    It is self-signed, so accept the warning once. Everything else works\n'
+printf '    over either address.\n'
+printf '\n'
 printf '    admin    \033[1m%s\033[0m\n\n' "${ADMIN_TOKEN:-see .env}"
 
 warn "the admin token is the key to every enrolled laptop — it is yours, not the room's"
