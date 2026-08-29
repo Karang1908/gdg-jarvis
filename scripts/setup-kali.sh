@@ -197,6 +197,50 @@ if [ -n "$VOICE_MISSING" ]; then
   warn "  sudo apt install -y$(printf ' %s' $VOICE_MISSING)"
 fi
 
+# ---------------------------------------------------------------------------------------
+# Hearing
+#
+# The microphone is on this machine, so this machine needs something to record with and
+# something to transcribe with. They fail independently and have different fixes, so they
+# are reported separately — "the mic does not work" would send someone to check hardware
+# that is fine.
+#
+# sox is worth the install even where arecord exists: it is the only one of these that
+# stops recording when the speaker stops talking. Without it, speech is cut into fixed
+# blocks, which is usable but feels broken.
+# ---------------------------------------------------------------------------------------
+
+EARS_MISSING=""
+
+if command -v rec >/dev/null 2>&1; then
+  ok "sox can record, and stops when you stop talking"
+elif command -v arecord >/dev/null 2>&1 || command -v ffmpeg >/dev/null 2>&1; then
+  warn "can record, but with no silence detection — speech is cut into fixed blocks"
+  warn "  sudo apt install -y sox   (recommended: ends an utterance when you stop)"
+else
+  warn "nothing here can record audio — JARVIS cannot listen"
+  EARS_MISSING="sox"
+fi
+
+if command -v whisper-cli >/dev/null 2>&1 || command -v whisper-cpp >/dev/null 2>&1; then
+  if [ -n "${JARVIS_WHISPER_MODEL:-}" ]; then
+    ok "whisper.cpp will transcribe locally"
+  else
+    warn "whisper.cpp is installed but JARVIS_WHISPER_MODEL is unset — set it in .env"
+  fi
+elif command -v whisper >/dev/null 2>&1; then
+  ok "whisper will transcribe locally"
+elif [ -n "${GEMINI_API_KEY:-}" ] || { [ -f "$REPO_ROOT/.env" ] && grep -q '^GEMINI_API_KEY=.\+' "$REPO_ROOT/.env" 2>/dev/null; }; then
+  ok "Gemini will transcribe — needs the uplink, same key as the voice"
+else
+  warn "nothing here can transcribe speech — spoken commands will not work"
+  warn "  put a key in .env (free: aistudio.google.com/apikey), or install whisper"
+fi
+
+if [ -n "$EARS_MISSING" ]; then
+  warn "  sudo apt install -y$(printf ' %s' $EARS_MISSING)"
+fi
+
 # Whatever the checks above concluded, the only convincing evidence is hearing it.
 warn "to hear it for yourself:  scripts/warm-voice.sh --test"
 
@@ -414,13 +458,8 @@ bold "Operator"
 printf '\n    wall     http://%s:3000/wall/\n' "$CORE_IP"
 printf '    control  http://%s:3000/control/\n' "$CORE_IP"
 printf '\n'
-printf '    On a phone, use the https address instead — browsers only allow the\n'
-printf '    microphone over https or on localhost:\n'
-printf '\n'
-printf '      \033[1mhttps://%s:3443/control/\033[0m\n' "$CORE_IP"
-printf '\n'
-printf '    It is self-signed, so accept the warning once. Everything else works\n'
-printf '    over either address.\n'
+printf '    The phone opens the plain http address above. It is a remote — the\n'
+printf '    microphone it switches on is the one on THIS machine.\n'
 printf '\n'
 printf '    admin    \033[1m%s\033[0m\n\n' "${ADMIN_TOKEN:-see .env}"
 
