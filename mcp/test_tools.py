@@ -126,6 +126,9 @@ async def main() -> int:
 
     check("overlay_url mints a link", "ticket=" in str(call(mod, "overlay_url", device="1").get("url")))
     check("reload_personality", call(mod, "reload_personality").get("ok"))
+
+    noted = call(mod, "remember", fact="integration test note")
+    check("remember writes a fact", noted.get("ok"), json.dumps(noted)[:200])
     check("forget_device", call(mod, "forget_device", device="2").get("ok"))
 
     print("\nRefusals")

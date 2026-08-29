@@ -81,11 +81,24 @@ async function startCore() {
     ].join('\n') + '\n'
   );
 
+  // A scratch memory file, so exercising `remember` does not append test noise to the
+  // operator's own notes every time the suite runs.
+  const memoryFile = path.join(os.tmpdir(), `jarvis-test-${process.pid}-memory.md`);
+  fs.writeFileSync(memoryFile, '# Test memory\n');
+
   core = spawn(
     process.execPath,
-    [path.join(ROOT, 'core', 'server.js'), '--host', '127.0.0.1', '--port', String(PORT), '--env', envFile],
+    [
+      path.join(ROOT, 'core', 'server.js'),
+      '--host', '127.0.0.1',
+      '--port', String(PORT),
+      '--env', envFile,
+      '--memory', memoryFile,
+    ],
     { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] }
   );
+
+  core.memoryFile = memoryFile;
 
   core.envFile = envFile;
   core.log = '';
@@ -118,10 +131,12 @@ function stopCore() {
     } catch {
       /* gone */
     }
-    try {
-      fs.unlinkSync(core.envFile);
-    } catch {
-      /* gone */
+    for (const file of [core.envFile, core.memoryFile]) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* gone */
+      }
     }
   }
 }
@@ -300,6 +315,10 @@ async function heartbeat(device, extra = {}) {
   check('overlay/url mints a link', String((await api('POST', '/api/overlay/url', { node: '1' })).data.url).includes('ticket='));
   check('auth/ticket mints a ticket', typeof (await api('POST', '/api/auth/ticket', {})).data.ticket === 'string');
   check('personality reload', (await api('POST', '/api/personality/reload', {})).data.ok === true);
+
+  const noted = await api('POST', '/api/remember', { text: 'integration test note' });
+  check('remember writes to memory', noted.data.ok === true, JSON.stringify(noted.data));
+  check('remember refuses an empty note', (await api('POST', '/api/remember', { text: '  ' })).data.ok === false);
   check('forget removes a device', (await api('POST', '/api/forget', { device: '2' })).data.ok === true);
 
   // --- refusals -----------------------------------------------------------------------
