@@ -50,6 +50,7 @@ function parseArgs(argv) {
     apps: path.join(__dirname, 'config', 'apps.json'),
     layout: path.join(__dirname, 'config', 'layout.json'),
     personality: path.join(__dirname, 'config', 'personality.md'),
+    memory: path.join(__dirname, 'config', 'memory.md'),
     phrases: path.join(__dirname, 'config', 'phrases.json'),
     env: path.join(__dirname, '..', '.env'),
   };
@@ -75,6 +76,9 @@ function parseArgs(argv) {
         break;
       case '--personality':
         options.personality = path.resolve(value);
+        break;
+      case '--memory':
+        options.memory = path.resolve(value);
         break;
       case '--phrases':
         options.phrases = path.resolve(value);
@@ -122,7 +126,7 @@ try {
       fix: 'set GEMINI_API_KEY in .env, or install piper',
     });
   }
-  personality.load(options.personality);
+  personality.load(options.personality, options.memory);
   choreography.init(require(options.layout));
   registry.reset();
 } catch (err) {
@@ -616,10 +620,26 @@ router.get('/api/personality', (req, res, context) => {
   json(res, 200, { ok: true, ...personality.get() });
 });
 
+/**
+ * Add something to JARVIS's memory.
+ *
+ * Appended to memory.md under a marked heading, so it survives a restart and it is obvious
+ * later which lines a human wrote and which the model added.
+ */
+router.post('/api/remember', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const noted = personality.remember(body.text);
+  if (noted.ok) personality.load(options.personality, options.memory);
+  json(res, noted.ok ? 200 : 400, noted);
+});
+
 /** Re-read personality.md without restarting Core, so it can be tuned during rehearsal. */
 router.post('/api/personality/reload', (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
-  json(res, 200, { ok: true, ...personality.load(options.personality) });
+  json(res, 200, { ok: true, ...personality.load(options.personality, options.memory) });
 });
 
 // --- Enrollment (§7) -----------------------------------------------------------------

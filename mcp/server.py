@@ -548,8 +548,25 @@ def overlay_url(device: str, scene: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+def remember(fact: str) -> dict[str, Any]:
+    """Write something down so you still know it later.
+
+    Use when the presenter tells you something worth keeping — whose laptop is which, a URL
+    they will ask for, a name, a correction to something you got wrong. It is appended to
+    the memory file and survives a restart.
+
+    Keep each one a single short sentence. This is a notebook, not a transcript: writing
+    down everything said makes the useful facts harder to find later.
+    """
+    result = _call("/api/remember", {"text": fact})
+    if not result.get("ok"):
+        return {"ok": False, "action": "remember", "error": result.get("error", "failed")}
+    return {"ok": True, "action": "remember", "remembered": result.get("remembered")}
+
+
+@mcp.tool()
 def reload_personality() -> dict[str, Any]:
-    """Re-read the personality file after it has been edited.
+    """Re-read the personality and memory files after they have been edited.
 
     Use when the presenter says they have changed how you should behave. The new
     instructions apply from the next message; this returns them so they can be applied

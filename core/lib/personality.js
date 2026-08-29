@@ -8,9 +8,17 @@
  * in code means it can be rewritten between rehearsals without touching anything else, and
  * reloaded without restarting Core.
  *
- * Core does not interpret it. It loads it, and serves it to the MCP server and to
- * Antigravity's installer, so there is exactly one copy and no chance of the personality on
- * disk disagreeing with the one the model is actually running.
+ * Two files, not one:
+ *
+ *   personality.md   who JARVIS is — the character, and how it speaks
+ *   memory.md        what JARVIS knows — this room, these people, this run of show
+ *
+ * Kept apart because they change for different reasons and on different timescales. The
+ * character is written once and tuned rarely; the facts change every time the demo is set
+ * up somewhere new. Merging them would mean rewriting the character to correct a hostname.
+ *
+ * Core does not interpret either. It loads them and serves the pair, so there is exactly
+ * one copy of each and no chance of what is on disk disagreeing with what the model runs.
  */
 
 const fs = require('fs');
@@ -51,7 +59,16 @@ function splitFrontmatter(source) {
   return { meta, body: match[2].trim() };
 }
 
-function load(filePath) {
+/** Read a markdown file, returning '' if it is not there. Absent is normal for memory. */
+function readIfPresent(filePath) {
+  try {
+    return fs.readFileSync(path.resolve(filePath), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function load(filePath, memoryPath) {
   const resolved = path.resolve(filePath);
 
   if (!fs.existsSync(resolved)) {
@@ -78,23 +95,63 @@ function load(filePath) {
 
   const { meta, body } = splitFrontmatter(raw);
 
+  // Memory is optional and separate. A missing file is normal — a room that has not been
+  // described yet still runs, JARVIS simply knows nothing specific about it.
+  const memoryFile = memoryPath ? path.resolve(memoryPath) : null;
+  const memoryRaw = memoryFile ? readIfPresent(memoryFile) : '';
+  const memory = memoryRaw ? splitFrontmatter(memoryRaw).body : '';
+
   state = {
     loaded: true,
     path: resolved,
+    memoryPath: memoryFile,
     name: meta.name || 'JARVIS',
     description: meta.description || 'Control intelligence for an authorized device demonstration.',
     body,
-    digest: crypto.createHash('sha256').update(body).digest('hex').slice(0, 12),
+    memory,
+    // Covers both files, so editing either one is visibly a different personality.
+    digest: crypto.createHash('sha256').update(body + memory).digest('hex').slice(0, 12),
     loadedAt: Date.now(),
   };
 
   log.good('personality loaded', {
     name: state.name,
     words: body.split(/\s+/).filter(Boolean).length,
+    memory: memory ? `${memory.split(/\s+/).filter(Boolean).length} words` : 'none',
     digest: state.digest,
   });
 
   return summary();
+}
+
+/**
+ * Append something JARVIS was told to remember.
+ *
+ * Written at the end of memory.md under its own heading, so it is obvious later which lines
+ * a human wrote and which the model added, and so clearing what it picked up between runs
+ * is a matter of deleting one section.
+ *
+ * Newlines are flattened out of the note. A multi-line entry would break the one-fact-per-
+ * bullet shape that makes the file readable, and this is a notebook rather than a
+ * transcript.
+ */
+function remember(text) {
+  if (!state.memoryPath) return { ok: false, error: 'no_memory_file' };
+
+  const line = String(text || '').replace(/[\r\n]+/g, ' ').trim();
+  if (!line) return { ok: false, error: 'empty' };
+
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+  try {
+    fs.appendFileSync(state.memoryPath, `\n- ${line}  <!-- ${stamp} -->\n`);
+  } catch (err) {
+    log.error('could not write to memory', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+
+  log.good('remembered', { note: line.slice(0, 80) });
+  return { ok: true, remembered: line };
 }
 
 /** Metadata only. Safe for the wall and the health check. */
@@ -105,13 +162,25 @@ function summary() {
     description: state.description,
     digest: state.digest,
     words: state.body ? state.body.split(/\s+/).filter(Boolean).length : 0,
+    memoryWords: state.memory ? state.memory.split(/\s+/).filter(Boolean).length : 0,
+    hasMemory: Boolean(state.memory),
     loadedAt: state.loadedAt,
   };
 }
 
-/** The whole thing, for the MCP server and the Antigravity installer. */
+/**
+ * The whole thing, for the MCP server and the Antigravity installer.
+ *
+ * `body` is the two files joined, because that is what a model needs to receive — character
+ * and facts as one instruction. They are also returned separately for anything that wants
+ * to show or edit one of them.
+ */
 function get() {
-  return { ...summary(), body: state.body };
+  const combined = state.memory
+    ? `${state.body}\n\n---\n\n# What you know about this room\n\n${state.memory}`
+    : state.body;
+
+  return { ...summary(), body: combined, personality: state.body, memory: state.memory };
 }
 
-module.exports = { load, get, summary, splitFrontmatter };
+module.exports = { load, get, remember, summary, splitFrontmatter };
