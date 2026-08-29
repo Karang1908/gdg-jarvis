@@ -152,32 +152,41 @@ separate uplink exists. Without one everything except the AI layer still works.
 
 ### Giving JARVIS a good voice
 
+Copy `.env.example` to `.env` and put a key in it:
+
+```bash
+cp .env.example .env
+$EDITOR .env          # GEMINI_API_KEY=... — free at aistudio.google.com
+```
+
+That is the whole thing. JARVIS calls the model when it speaks, and plays what comes back.
+Repeated lines are remembered so they cost nothing the second time, and if a call takes
+longer than a second the local voice speaks instead — you never wait on the network.
+
+`.env` also holds the voice name, the delivery style, and the budget.
+
 JARVIS speaks from Kali, so its audio output is the room's voice — feed it to the PA if
-there is one. Pick one:
+there is one.
+
+Time to first sound, measured:
+
+| | |
+| --- | --- |
+| a line it has said before | ~0 ms |
+| a new line, local voice | ~470 ms |
+| a new line, Gemini | one network round trip, capped at 1s |
+
+If you would rather not depend on the network at all, **Piper** is a local neural voice
+that is both natural and faster than the cloud:
 
 ```bash
-# Most natural. Free tier at aistudio.google.com. Needs internet only when warming.
-export GEMINI_API_KEY=...
-
-# Natural and fully offline.
-pip install piper-tts        # then point voice.piper.model at an en_GB .onnx
-
-# Last resort, and it sounds like it.
-sudo apt install speech-dispatcher espeak-ng
+pip install piper-tts                       # then set JARVIS_PIPER_MODEL in .env
+sudo apt install speech-dispatcher espeak-ng   # last resort, and it sounds like it
 ```
 
-Then **pre-generate every line the demo uses**, once, while Kali has internet:
-
-```bash
-scripts/warm-voice.sh
-```
-
-That is what makes a cloud voice safe to use live. Cached lines are files — no network, no
-synthesiser, and the scripted beats keep their good voice even if the tether drops. Only
-lines the model invents on the spot are synthesised at showtime.
-
-Edit `core/config/phrases.json` to change what gets warmed; the controller's buttons read
-the same list, so they can't drift apart.
+If a venue's connection is bad enough that you want every scripted line ready in advance,
+`scripts/warm-voice.sh` generates them all from `core/config/phrases.json`. That is an
+optimisation for a known-bad network, not a step you normally need.
 
 ### 6. Who JARVIS is
 
