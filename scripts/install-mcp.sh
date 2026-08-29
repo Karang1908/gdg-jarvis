@@ -62,15 +62,10 @@ bold ""
 bold "JARVIS → Antigravity"
 bold ""
 
-CONFIG="$REPO_ROOT/core/config/core.json"
-if [ ! -f "$CONFIG" ]; then
-  bad "no core/config/core.json — run scripts/setup-kali.sh --secrets-only first"
-  exit 1
-fi
-
-ADMIN_TOKEN=$(node -e "process.stdout.write(require('$CONFIG').admin.token)" 2>/dev/null)
+ADMIN_TOKEN=$(node "$REPO_ROOT/core/lib/settings.js" admin 2>/dev/null)
 if [ -z "$ADMIN_TOKEN" ]; then
-  bad "could not read admin.token from core.json"
+  bad "JARVIS_ADMIN_PASSWORD is not set"
+  warn "  cp .env.example .env   and edit it"
   exit 1
 fi
 

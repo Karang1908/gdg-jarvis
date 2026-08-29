@@ -23,7 +23,7 @@ set -uo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT" || exit 1
 
-CONFIG="core/config/core.json"
+CONFIG=".env"
 PHRASES="core/config/phrases.json"
 MODE="warm"
 EXTRA=""
@@ -43,7 +43,7 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
 
-[ -f "$CONFIG" ] || { bad "no $CONFIG — run scripts/setup-kali.sh --secrets-only"; exit 1; }
+[ -f "$CONFIG" ] || { bad "no .env — cp .env.example .env and edit it"; exit 1; }
 
 bold ""
 bold "JARVIS — voice cache"
@@ -60,8 +60,7 @@ const voice = require("./core/lib/voice.js");
 const mode = process.argv[1];
 const extra = process.argv[2] || "";
 
-const config = JSON.parse(fs.readFileSync("./core/config/core.json", "utf8"));
-const state = voice.init(config.voice || {});
+const state = voice.init(require("./core/lib/settings.js").load().voice);
 
 if (mode === "clear") {
   const dir = state.cacheDir;
@@ -102,7 +101,7 @@ if (!canSynthesise) {
   console.log("    export GEMINI_API_KEY=...        free tier, most natural");
   console.log("    pip install piper-tts            local, no internet needed");
   console.log("");
-  console.log("  Then set voice.provider in core/config/core.json, or leave it on auto.");
+  console.log("  Then set JARVIS_VOICE_PROVIDER in .env, or leave it unset for auto.");
   process.exit(1);
 }
 
@@ -154,8 +153,7 @@ if [ "$MODE" = "warm" ] && [ $STATUS -eq 0 ]; then
   node -e '
     const voice = require("./core/lib/voice.js");
     const fs = require("fs");
-    const config = JSON.parse(fs.readFileSync("./core/config/core.json", "utf8"));
-    const state = voice.init(config.voice || {});
+    const state = voice.init(require("./core/lib/settings.js").load().voice);
     if (!state.player) { console.log("  \x1b[33m!\x1b[0m nothing on this machine can play audio"); process.exit(0); }
 
     (async () => {

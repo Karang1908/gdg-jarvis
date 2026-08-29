@@ -21,7 +21,7 @@ set -uo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT" || exit 1
 
-CONFIG="core/config/core.json"
+CONFIG=".env"
 PORT=3000
 BIND=""
 START_AGENT=1
@@ -76,15 +76,20 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f "$CONFIG" ]; then
-  warn "no configuration; generating one"
-  scripts/setup-kali.sh --secrets-only >/dev/null 2>&1 || {
-    bad "could not generate $CONFIG"; exit 1; }
+if [ ! -f "$CONFIG" ] && [ -f .env.example ]; then
+  cp .env.example "$CONFIG"
+  warn "created .env from the example — edit it to set your own passwords"
 fi
-ok "configuration present"
 
-ADMIN=$(node -e "process.stdout.write(require('./$CONFIG').admin.token)")
-JOIN_SECRET=$(node -e "process.stdout.write(require('./$CONFIG').join.secret)")
+if ! node core/lib/settings.js --check 2>/dev/null; then
+  bad "fix .env before starting:"
+  node core/lib/settings.js --check 2>&1 | sed 's/^/    /'
+  exit 1
+fi
+ok "settings loaded from .env"
+
+ADMIN=$(node core/lib/settings.js admin)
+JOIN_SECRET=$(node core/lib/settings.js join)
 
 # ---------------------------------------------------------------------------------------
 # Teardown

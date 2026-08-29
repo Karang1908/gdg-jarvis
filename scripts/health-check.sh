@@ -80,17 +80,15 @@ fi
 if [ -z "$ADMIN" ]; then
   # Read it from the registry when running out of a checkout, so the common case needs no
   # environment variable.
-  if [ -f "$(dirname "${BASH_SOURCE[0]}")/../core/config/core.json" ] && command -v node >/dev/null 2>&1; then
-    ADMIN=$(node -e "
-      process.stdout.write(require('$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/core/config/core.json').admin.token)
-    " 2>/dev/null)
+  if command -v node >/dev/null 2>&1; then
+    ADMIN=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/core/lib/settings.js" admin 2>/dev/null)
   fi
 fi
 
 if [ -z "$ADMIN" ]; then
   bold ""
   warn "no admin token; skipping the node checks"
-  warn "set JARVIS_ADMIN_TOKEN or run this from the repository"
+  warn "set JARVIS_ADMIN_PASSWORD in .env, or run this from the repository"
   printf '\n'
   exit $problems
 fi

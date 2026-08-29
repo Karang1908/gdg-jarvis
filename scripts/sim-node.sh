@@ -11,8 +11,7 @@
 #   scripts/sim-node.sh "lab-3" --server http://10.42.0.1:3000 --secret <secret>
 #
 # The name is what appears on the wall; Core assigns the number. With no --secret it reads
-# one from core/config/core.json, so on the Core machine it needs no arguments beyond a
-# name.
+# one from .env, so on the Core machine it needs no arguments beyond a name.
 #
 # Two things this is genuinely for:
 #
@@ -57,12 +56,12 @@ fi
 
 # Running on the Core machine is the common case, so read the secret rather than making
 # the operator paste it into every simulated device.
-if [ -z "$JOIN_SECRET" ] && [ -f "$REPO_ROOT/core/config/core.json" ]; then
-  JOIN_SECRET=$(node -e "process.stdout.write(require('$REPO_ROOT/core/config/core.json').join.secret)" 2>/dev/null)
+if [ -z "$JOIN_SECRET" ]; then
+  JOIN_SECRET=$(node "$REPO_ROOT/core/lib/settings.js" join 2>/dev/null)
 fi
 
 if [ -z "$JOIN_SECRET" ]; then
-  echo "no join secret; pass --secret or run from the machine holding core/config/core.json" >&2
+  echo "no join secret; pass --secret, or run from the machine whose .env has it" >&2
   exit 2
 fi
 
