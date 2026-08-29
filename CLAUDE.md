@@ -106,8 +106,10 @@ core/lib/wire.js          percent-encoding; the security boundary for the shell 
 core/lib/commands.js      the only path to a node — single funnel, so logging cannot be missed
 core/lib/registry.js      dynamic enrollment, stable numbering, presence follows the socket
 core/lib/choreography.js  stagger and cascade timing
+core/lib/ears.js          the microphone — capture + transcription, on this machine
+core/lib/intents.js       what a sentence means; matched before any model is involved
+core/lib/ask.js           the bridge to agy, for sentences intents.js does not know
 core/public/shared/       design tokens, scenes, wall renderer — shared by all three UIs
-core/public/control/voice.js  local speech intents; no LLM in the path
 agent/                    macOS bash + Windows PowerShell, same wire protocol
 mcp/server.py             HTTP to Core only; contains no OS-specific logic by design
 ```
