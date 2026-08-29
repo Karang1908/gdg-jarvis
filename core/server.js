@@ -102,8 +102,8 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv);
 
-// Before anything reads process.env. A .env next to the repository is the easy place to
-// put an API key without it landing in a file that sits beside the code.
+// lib/settings loads .env during auth.load() below; this is only so the banner can say
+// whether it found one.
 const envFile = env.load(options.env);
 
 // ---------------------------------------------------------------------------------
@@ -111,7 +111,7 @@ const envFile = env.load(options.env);
 // ---------------------------------------------------------------------------------
 
 try {
-  const config = auth.load(options.config);
+  const config = auth.load({ config: options.config, env: options.env });
   validate.loadApps(options.apps);
   const voiceState = voice.init(config.voice || {});
   if (envFile.loaded) {

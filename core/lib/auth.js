@@ -10,20 +10,22 @@
  *   admin token   controls the room. The controller and the MCP server hold it.
  *   session token issued per device at enrollment, valid until it disconnects.
  *
+ * Both come from `.env`, resolved by lib/settings.js. There is one file to edit and no
+ * generated JSON to keep in step with it.
+ *
  * SPEC.md §8 assumed a fixed roster with a pre-shared token per node. That is abandoned
  * deliberately — the room has to accept any number of devices, arriving in any order, with
  * nobody editing a config file (see DEVIATIONS.md D8). What survives is the part that
  * matters: joining the Wi-Fi still grants nothing on its own, and controlling *other*
- * people's machines still needs the admin token, which is never handed out.
+ * people's machines still needs the admin password, which is never handed out.
  *
  * The worst a leaked join secret buys is the ability to put JARVIS on your own screen.
  */
 
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 
 const log = require('./log');
+const settings = require('./settings');
 
 const TICKET_TTL_MS = 60_000;
 const TICKET_SWEEP_MS = 30_000;
@@ -52,56 +54,28 @@ function secretsMatch(submitted, expected) {
  * Failing loudly here is deliberate. A Core that boots with placeholder secrets fails in
  * front of an audience instead of at setup time.
  */
-function load(configPath) {
-  const resolved = path.resolve(configPath);
+function load(options = {}) {
+  const resolved = settings.load(options);
+  const found = settings.problems(resolved);
 
-  if (!fs.existsSync(resolved)) {
+  if (found.length) {
     throw new Error(
-      `No configuration at ${resolved}\n` +
-        `  Run scripts/setup-kali.sh --secrets-only to generate one.`
+      `Configuration:\n  - ${found.join('\n  - ')}\n\n` +
+        `  Everything lives in .env at the top of the repository.\n` +
+        `  Copy .env.example to .env if you have not already, then edit it.`
     );
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-  } catch (err) {
-    throw new Error(`Configuration at ${resolved} is not valid JSON: ${err.message}`);
-  }
-
-  const problems = [];
-  if (!parsed.admin || typeof parsed.admin.token !== 'string' || !parsed.admin.token) {
-    problems.push('admin.token is missing');
-  } else if (parsed.admin.token.startsWith('CHANGE-ME')) {
-    problems.push('admin.token is still a placeholder');
-  }
-
-  if (!parsed.join || typeof parsed.join.secret !== 'string' || !parsed.join.secret) {
-    problems.push('join.secret is missing');
-  } else if (parsed.join.secret.startsWith('CHANGE-ME')) {
-    problems.push('join.secret is still a placeholder');
-  }
-
-  // The one that would be quietly catastrophic: if these were ever equal, the secret
-  // printed into every teammate's join script would also be the key to the whole room.
-  if (parsed.admin && parsed.join && parsed.admin.token === parsed.join.secret) {
-    problems.push('admin.token and join.secret must not be the same value');
-  }
-
-  if (problems.length) {
-    throw new Error(`Configuration at ${resolved}:\n  - ${problems.join('\n  - ')}`);
-  }
-
-  config = parsed;
+  config = resolved;
   return config;
 }
 
 function adminToken() {
-  return config ? config.admin.token : null;
+  return config ? config.admin : null;
 }
 
 function joinSecret() {
-  return config ? config.join.secret : null;
+  return config ? config.join : null;
 }
 
 function wifi() {
@@ -118,7 +92,7 @@ function wifi() {
 function authenticateJoin(secret, remoteAddress) {
   if (!config) return { ok: false, reason: 'not_configured' };
 
-  if (!secretsMatch(secret, config.join.secret)) {
+  if (!secretsMatch(secret, config.join)) {
     log.deny('join refused', { reason: 'bad_secret', from: remoteAddress });
     return { ok: false, reason: 'bad_secret' };
   }
@@ -133,7 +107,7 @@ function authenticateAdmin(headerValue) {
   const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   if (!match) return false;
 
-  return secretsMatch(match[1], config.admin.token);
+  return secretsMatch(match[1], config.admin);
 }
 
 /**
