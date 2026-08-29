@@ -326,6 +326,44 @@ async function heartbeat(device, extra = {}) {
   check('remember refuses an empty note', (await api('POST', '/api/remember', { text: '  ' })).data.ok === false);
   check('forget removes a device', (await api('POST', '/api/forget', { device: '2' })).data.ok === true);
 
+  // --- hearing ------------------------------------------------------------------------
+  //
+  // The microphone is on this machine, so these assert Core's own listening state rather
+  // than anything a browser does. Whether audio hardware exists here is not the test's
+  // business — the route has to answer honestly either way.
+  console.log('\nHearing');
+
+  const micState = await api('GET', '/api/mic');
+  check('mic reports its state', micState.status === 200 && typeof micState.data.available === 'boolean',
+    JSON.stringify(micState.data).slice(0, 140));
+
+  const micOn = await api('POST', '/api/mic', { on: true });
+  // Listening only becomes true where capture and transcription both exist. On a machine
+  // with neither, refusing is the correct answer, and saying so is the point of the route.
+  check('mic on is honest about whether it opened',
+    micOn.status === 200 && micOn.data.listening === micOn.data.available,
+    JSON.stringify(micOn.data).slice(0, 160));
+
+  check('mic off', (await api('POST', '/api/mic', { on: false })).data.listening === false);
+
+  // A sentence Core hears takes the same path whether it arrived by microphone or by text,
+  // which is what makes this testable at all.
+  const spoken = await api('POST', '/api/utterance', { text: 'jarvis show me the architecture' });
+  check('a spoken scene command is matched without the model',
+    spoken.data.matched === 'scene' && spoken.data.viaModel === undefined,
+    JSON.stringify(spoken.data).slice(0, 160));
+
+  const counted = await api('POST', '/api/utterance', { text: 'jarvis how many are online' });
+  check('a spoken question about the room is answered from the registry',
+    counted.data.matched === 'count' && typeof counted.data.spoken === 'string',
+    JSON.stringify(counted.data).slice(0, 160));
+
+  check('an empty utterance is refused',
+    (await api('POST', '/api/utterance', { text: '   ' })).data.error === 'empty');
+
+  check('the microphone needs the admin password',
+    (await api('POST', '/api/mic', { on: true }, null)).status === 401);
+
   // --- refusals -----------------------------------------------------------------------
   console.log('\nRefusals');
   const refused = async (name, route, body, reason) => {
