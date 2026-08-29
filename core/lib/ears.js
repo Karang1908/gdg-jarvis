@@ -43,7 +43,53 @@ let onTranscript = null;
 let workDir = null;
 
 function have(command) {
+  // spawnSync is fine here: this runs once, at startup, before anything is serving.
   return spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
+}
+
+/**
+ * Run a command without stopping the world.
+ *
+ * spawnSync is shorter and is what this used to use, but it blocks Node's event loop for
+ * the whole run. Transcription takes seconds, and during those seconds Core served nothing
+ * at all — no event stream, no commands, no health check. Measured at a 2.5 second freeze
+ * per utterance, on every utterance.
+ */
+function runCommand(command, args, timeoutMs) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      return resolve({ status: -1, stdout: '', stderr: err.message });
+    }
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < 64_000) stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < 8_000) stderr += chunk;
+    });
+
+    const guard = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* gone */
+      }
+    }, timeoutMs);
+    guard.unref();
+
+    const settle = (result) => {
+      clearTimeout(guard);
+      resolve(result);
+    };
+
+    child.on('error', (err) => settle({ status: -1, stdout, stderr: err.message }));
+    child.on('exit', (status) => settle({ status, stdout, stderr }));
+  });
 }
 
 /* ------------------------------------------------------------------------------------
@@ -96,13 +142,11 @@ const CAPTURE = [
 const TRANSCRIBE = [
   {
     name: 'whisper.cpp',
-    available: () => (have('whisper-cli') || have('whisper-cpp')) && Boolean(modelPath()),
+    available: () => Boolean(whisperCppBinary()) && Boolean(modelPath()),
     async run(file) {
-      const binary = have('whisper-cli') ? 'whisper-cli' : 'whisper-cpp';
-      const result = spawnSync(binary, ['-m', modelPath(), '-f', file, '-nt', '-l', 'en'], {
-        encoding: 'utf8',
-        timeout: 30_000,
-      });
+      // Resolved once at startup rather than probed per utterance — `command -v` is a
+      // synchronous spawn, and this path runs on every single thing anyone says.
+      const result = await runCommand(whisperCppBinary(), ['-m', modelPath(), '-f', file, '-nt', '-l', 'en'], 30_000);
       if (result.status !== 0) throw new Error(String(result.stderr || '').slice(0, 160));
       return result.stdout;
     },
@@ -113,11 +157,11 @@ const TRANSCRIBE = [
     async run(file) {
       // The Python CLI writes next to the input rather than to stdout.
       const out = path.dirname(file);
-      const result = spawnSync(
+      const result = await runCommand(
         'whisper',
         [file, '--model', whisperSize(), '--language', 'en',
          '--output_format', 'txt', '--output_dir', out, '--fp16', 'False'],
-        { encoding: 'utf8', timeout: 60_000 }
+        60_000
       );
       if (result.status !== 0) throw new Error(String(result.stderr || '').slice(0, 160));
       const txt = file.replace(/\.wav$/, '.txt');
@@ -193,6 +237,15 @@ function apiKey() {
  */
 function modelPath() {
   return config.whisperCppModel || process.env.JARVIS_WHISPER_MODEL || '';
+}
+
+/** Whichever whisper.cpp binary this machine has, decided once. */
+let whisperCppResolved;
+function whisperCppBinary() {
+  if (whisperCppResolved === undefined) {
+    whisperCppResolved = have('whisper-cli') ? 'whisper-cli' : have('whisper-cpp') ? 'whisper-cpp' : null;
+  }
+  return whisperCppResolved;
 }
 
 /** Which Python whisper model. tiny.en is the one that keeps up with a live demo. */
@@ -360,13 +413,24 @@ async function loop() {
 
     // Silence transcribes to nothing, or to a stray "you" / "thanks" that whisper emits for
     // near-silence. Neither is worth waking the room for.
+    // Re-checked after transcribing, not just after recording: transcription takes seconds,
+    // and a command that fires after the presenter has already closed the microphone is
+    // exactly the kind of thing the button exists to prevent.
+    if (!listening) break;
+
     if (text && text.length > 2 && onTranscript) {
       log.info('HEARD', { text: text.slice(0, 120) });
-      try {
-        await onTranscript(text);
-      } catch (err) {
-        log.error('handling what was heard threw', { error: err.message });
-      }
+
+      // Deliberately not awaited. Acting on a sentence can mean a model call taking twelve
+      // to seventeen seconds, and waiting for it here would mean the microphone hears
+      // nothing for that whole time — so "jarvis take the room", said while JARVIS was
+      // still thinking about the last thing, was never heard at all.
+      //
+      // Whoever handles the transcript is responsible for not starting two of those at
+      // once; see the guard in server.js.
+      Promise.resolve()
+        .then(() => onTranscript(text))
+        .catch((err) => log.error('handling what was heard threw', { error: err.message }));
     }
   }
 }
