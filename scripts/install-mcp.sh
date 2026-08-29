@@ -54,6 +54,17 @@ else
   TARGET="$HOME/.gemini/config/mcp_config.json"
 fi
 
+# Antigravity reads a workspace mcp_config.json but does not actually load servers from it
+# (antigravity-cli issue #60). Tested here: with jarvis-room declared workspace-locally, agy
+# reported the tools as unavailable and fell back to running shell commands instead. The
+# option is kept because the bug will presumably be fixed, but it cannot be the quiet
+# default that leaves someone wondering why the model ignores the room.
+if [ -n "$WORKSPACE" ]; then
+  printf '  \033[33m!\033[0m workspace configs are read but not loaded by Antigravity (issue #60)\n'
+  printf '  \033[33m!\033[0m the model will not see these tools — install globally instead:\n'
+  printf '      scripts/install-mcp.sh\n\n'
+fi
+
 # ---------------------------------------------------------------------------------------
 # What to register
 # ---------------------------------------------------------------------------------------

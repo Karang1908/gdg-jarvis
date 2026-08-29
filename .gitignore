@@ -9,6 +9,10 @@ agent/config.json
 # and voice settings were active — not something to carry between machines.
 core/cache/
 
+# .agents/AGENTS.md is tracked on purpose — a pull carries the persona. The MCP config
+# beside it is not: it holds the admin password, which must never reach the repository.
+.agents/mcp_config.json
+
 # Runtime state
 core/logs/
 *.log
