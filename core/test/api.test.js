@@ -316,6 +316,11 @@ async function heartbeat(device, extra = {}) {
   check('auth/ticket mints a ticket', typeof (await api('POST', '/api/auth/ticket', {})).data.ticket === 'string');
   check('personality reload', (await api('POST', '/api/personality/reload', {})).data.ok === true);
 
+  // agy is optional and slow, so this asserts the route behaves, not that a model answered.
+  const asked = await api('POST', '/api/ask', { text: '' });
+  check('ask refuses an empty question', asked.status === 200 && asked.data.ok === false,
+    JSON.stringify(asked.data));
+
   const noted = await api('POST', '/api/remember', { text: 'integration test note' });
   check('remember writes to memory', noted.data.ok === true, JSON.stringify(noted.data));
   check('remember refuses an empty note', (await api('POST', '/api/remember', { text: '  ' })).data.ok === false);
