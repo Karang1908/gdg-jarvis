@@ -121,12 +121,84 @@ async function main() {
 
   fs.unlinkSync(sample);
 
+  await responsiveness();
+
   if (failures === 0) {
-    console.log('\nPASS  ears: the transcription request is well formed and its failures explain themselves\n');
+    console.log('\nPASS  ears: the transcription request is well formed, failures explain themselves, and listening never blocks\n');
   } else {
     console.error(`\nFAIL  ${failures} check(s)\n`);
     process.exit(1);
   }
+}
+
+/**
+ * Listening must not stop the rest of Core.
+ *
+ * Two regressions this guards, both of which were real:
+ *
+ *   Transcription used spawnSync, which halts Node entirely. A 2.5 second freeze per
+ *   utterance meant Core served nothing at all while it thought — no event stream, no
+ *   commands, no health check.
+ *
+ *   The capture loop awaited the transcript handler. Acting on a sentence can mean a
+ *   twelve-second model call, and for those twelve seconds the microphone heard nothing,
+ *   so anything said meanwhile was lost.
+ *
+ * Driven with stub binaries so it measures this code and not a real recogniser.
+ */
+async function responsiveness() {
+  console.log('\nStaying responsive');
+
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-ears-bin-'));
+
+  fs.writeFileSync(path.join(bin, 'rec'),
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) out="$a";; esac; done\n' +
+    'head -c 2048 /dev/zero > "$out"\nexit 0\n', { mode: 0o755 });
+
+  // Slow enough to be obvious if it ever blocks the loop again.
+  fs.writeFileSync(path.join(bin, 'whisper'),
+    '#!/bin/sh\nsleep 0.6\nfor a in "$@"; do case "$a" in *.wav) s="$a";; esac; done\n' +
+    'echo "take the room" > "${s%.wav}.txt"\nexit 0\n', { mode: 0o755 });
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+
+  const ready = ears.init({});
+  if (!ready.available) {
+    console.log('  · skipped — could not stage stub capture/transcribe binaries');
+    process.env.PATH = originalPath;
+    return;
+  }
+
+  let worstStall = 0;
+  let last = Date.now();
+  const beat = setInterval(() => {
+    const now = Date.now();
+    worstStall = Math.max(worstStall, now - last);
+    last = now;
+  }, 50);
+
+  const heard = [];
+  ears.start(async () => {
+    heard.push(Date.now());
+    // Stands in for agy, which really does take this long and longer.
+    await new Promise((r) => setTimeout(r, 1200));
+  });
+
+  await new Promise((r) => setTimeout(r, 4000));
+
+  clearInterval(beat);
+  ears.stop();
+  process.env.PATH = originalPath;
+  fs.rmSync(bin, { recursive: true, force: true });
+
+  // Generous: a blocking spawnSync showed up as a 2.5 second stall, so anything near the
+  // timer interval is fine and the failure mode is unmistakable.
+  check('the event loop keeps running while transcribing',
+    worstStall < 500, `worst stall ${worstStall}ms — Core would be unresponsive that long`);
+
+  check('the microphone keeps listening while a transcript is acted on',
+    heard.length >= 3, `heard ${heard.length} utterances in 4s; a blocking handler yields 2 or fewer`);
 }
 
 main();
