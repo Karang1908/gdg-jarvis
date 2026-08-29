@@ -5,7 +5,7 @@
 #   npm test
 #   scripts/test.sh
 #
-# Five suites. The first four always run; the MCP one needs a Python venv with the SDK and
+# Six suites. The first four always run; the MCP one needs a Python venv with the SDK and
 # is skipped with a note rather than a failure if there is not one, because it depends on
 # something outside this repository.
 
@@ -14,21 +14,24 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 FAILED=0
 
-printf '\n\033[1m1/5  wire encoding\033[0m\n'
+printf '\n\033[1m1/6  wire encoding\033[0m\n'
 node core/test/wire.test.js || FAILED=1
 
 # Before the API suite, because these are pure and fast: if what a sentence means is wrong,
 # nothing downstream is worth reading.
-printf '\n\033[1m2/5  spoken intents\033[0m\n'
+printf '\n\033[1m2/6  spoken intents\033[0m\n'
 node core/test/intents.test.js || FAILED=1
 
-printf '\n\033[1m3/5  the controller\033[0m\n'
+printf '\n\033[1m3/6  the controller\033[0m\n'
 node core/test/control.test.js || FAILED=1
 
-printf '\n\033[1m4/5  API, end to end\033[0m\n'
+printf '\n\033[1m4/6  transcription requests\033[0m\n'
+node core/test/ears.test.js || FAILED=1
+
+printf '\n\033[1m5/6  API, end to end\033[0m\n'
 node core/test/api.test.js || FAILED=1
 
-printf '\n\033[1m5/5  MCP tools\033[0m\n'
+printf '\n\033[1m6/6  MCP tools\033[0m\n'
 PYTHON=""
 for candidate in .venv/bin/python venv/bin/python; do
   [ -x "$candidate" ] && "$candidate" -c 'import mcp' >/dev/null 2>&1 && PYTHON="$candidate" && break
