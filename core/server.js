@@ -17,14 +17,14 @@
 
 const fsp = require('fs');
 const http = require('http');
-const https = require('https');
 const os = require('os');
 const path = require('path');
 
 const ask = require('./lib/ask');
+const ears = require('./lib/ears');
 const env = require('./lib/env');
+const intents = require('./lib/intents');
 const personality = require('./lib/personality');
-const tls = require('./lib/tls');
 
 const auth = require('./lib/auth');
 const bus = require('./lib/bus');
@@ -54,8 +54,6 @@ function parseArgs(argv) {
     layout: path.join(__dirname, 'config', 'layout.json'),
     personality: path.join(__dirname, 'config', 'personality.md'),
     memory: path.join(__dirname, 'config', 'memory.md'),
-    tlsDir: path.join(__dirname, 'config', 'tls'),
-    tlsPort: 3443,
     phrases: path.join(__dirname, 'config', 'phrases.json'),
     env: path.join(__dirname, '..', '.env'),
   };
@@ -84,13 +82,6 @@ function parseArgs(argv) {
         break;
       case '--memory':
         options.memory = path.resolve(value);
-        break;
-      case '--tls-port':
-        options.tlsPort = Number(value);
-        break;
-      case '--no-tls':
-        options.tlsPort = 0;
-        i -= 1; // flag takes no value
         break;
       case '--phrases':
         options.phrases = path.resolve(value);
@@ -142,6 +133,7 @@ try {
 
   // Runs from the repository root so agy picks up .agents/AGENTS.md as its persona.
   ask.init({ cwd: path.join(__dirname, '..') });
+  ears.init(config.ears || {});
 
   choreography.init(require(options.layout));
   registry.reset();
@@ -571,6 +563,117 @@ router.post('/api/identify', async (req, res, context) => {
 });
 
 /**
+ * Act on something JARVIS heard.
+ *
+ * The fixed demo commands are matched here and dispatched immediately; anything else goes
+ * to the model. Shared by the microphone and by any client that wants to send a sentence,
+ * so both take exactly the same path.
+ */
+async function handleUtterance(text, source) {
+  const heard = String(text || '').trim();
+  if (!heard) return { ok: false, error: 'empty' };
+
+  observers.broadcast('heard', { text: heard, at: Date.now(), source });
+
+  // resolve rather than has, so "identify ravi" works as well as "identify two" — has only
+  // understands numbers, and a spoken hostname is the natural way to refer to a teammate.
+  const intent = intents.match(heard, (device) => registry.resolve(device).ok);
+
+  if (intent) {
+    if (intent.answer === 'count') {
+      const online = registry.onlineDevices().length;
+      const line = online === 0 ? 'No systems are online, sir.'
+        : online === 1 ? 'One authorized system is online.'
+        : `${online} authorized systems are online.`;
+      commands.speakAsJarvis(line, { source });
+      return { ok: true, matched: intent.name, spoken: line };
+    }
+
+    if (intent.say) commands.speakAsJarvis(intent.say, { source });
+
+    // Dispatched through the same functions the controller's buttons use, so a spoken
+    // command and a tapped one cannot behave differently.
+    const result = dispatchIntent(intent, source);
+    return { ok: true, matched: intent.name, label: intent.label, ...result };
+  }
+
+  // Not one of the fixed commands, so let the model reason about it.
+  const before = voice.describe().usage;
+  const spokenBefore = before.calls + before.saved;
+
+  const answered = await ask.ask(heard);
+
+  // The model can speak for itself through the MCP speak tool. Reading the usage counter is
+  // how we tell — anything else would say the answer twice.
+  const after = voice.describe().usage;
+  if (answered.ok && answered.answer && after.calls + after.saved === spokenBefore) {
+    commands.speakAsJarvis(answered.answer, { source });
+  }
+
+  // A failure is still worth hearing; otherwise a dead agy is indistinguishable from being
+  // ignored, and the presenter just repeats themselves into a room that will never answer.
+  if (!answered.ok && answered.detail) {
+    commands.speakAsJarvis(answered.detail, { source });
+  }
+
+  return { ok: answered.ok, viaModel: true, ...answered };
+}
+
+/** Turn a matched intent into the command it stands for. */
+function dispatchIntent(intent, source) {
+  const context = { source };
+  const body = intent.body || {};
+
+  switch (intent.route) {
+    case '/api/takeover': return commands.takeover(body.target, auth, context);
+    case '/api/release': return commands.release(body.target, context);
+    case '/api/identify': return commands.identify(body.target, auth, context);
+    case '/api/scene': return commands.scene(body.target, body.scene, context);
+    case '/api/broadcast': return commands.broadcast(body.scene, context);
+    case '/api/cascade': return commands.cascade(body.effect, context);
+    case '/api/move': {
+      const to = registry.resolve(body.to);
+      const here = registry.jarvisDevice();
+      if (!to.ok || to.all || !here) return { ok: false, error: 'device_unknown' };
+      if (here.number === to.number) return { ok: true, note: 'already there' };
+      return commands.move(here.number, to.number, context);
+    }
+    default: return { ok: false, error: 'no_route' };
+  }
+}
+
+/**
+ * The microphone on this machine.
+ *
+ * The phone's mic button calls this. It does not capture anything itself — Core hears,
+ * Core transcribes, Core decides. The phone is a remote for that.
+ */
+router.post('/api/mic', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const wanted = body.on === true || body.on === 'true' || body.on === 1;
+  const result = wanted ? ears.start((text) => handleUtterance(text, 'mic')) : ears.stop();
+
+  observers.broadcast('state', registry.snapshot());
+  json(res, 200, { ...result, ...ears.describe() });
+});
+
+router.get('/api/mic', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  json(res, 200, { ok: true, ...ears.describe() });
+});
+
+/** Send a sentence as if it had been heard. The text box beside the mic uses this. */
+router.post('/api/utterance', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+  json(res, 200, await handleUtterance(body.text, 'typed'));
+});
+
+/**
  * Put a sentence to the model.
  *
  * The far end of the microphone. The controller recognises the fixed demo commands itself
@@ -656,6 +759,7 @@ router.get('/api/voice', (req, res, context) => {
     ...voice.describe(),
     personality: personality.summary(),
     ask: ask.describe(),
+    ears: ears.describe(),
   });
 });
 
@@ -800,49 +904,6 @@ server.on('error', (err) => {
 });
 
 /**
- * The same Core, over https.
- *
- * Only so browsers will allow the microphone — speech recognition needs a secure context,
- * and a phone loading http://10.42.0.1:3000 does not have one. The certificate is
- * self-signed, so the browser warns once and then remembers.
- *
- * Plain http keeps serving on its usual port for the agents, which use curl and PowerShell
- * and should not need a flag to trust anything.
- */
-let secureServer = null;
-
-if (options.tlsPort > 0) {
-  const certificate = tls.ensure(options.tlsDir);
-
-  if (certificate.ok) {
-    secureServer = https.createServer({ key: certificate.key, cert: certificate.cert }, (req, res) => {
-      router.handle(req, res).catch((err) => {
-        log.error('request handler threw', { path: req.url, error: err.message });
-        if (!res.headersSent) json(res, 500, { ok: false, error: 'internal_error' });
-      });
-    });
-
-    secureServer.keepAliveTimeout = 0;
-    secureServer.headersTimeout = 0;
-    secureServer.requestTimeout = 0;
-
-    secureServer.listen(options.tlsPort, options.host, () => {
-      const where = origin.replace(/^http:/, 'https:').replace(`:${options.port}`, `:${options.tlsPort}`);
-      console.log('    microphone  ' + where + '/control/');
-      console.log('                (accept the certificate warning once — it is self-signed)');
-      console.log('');
-    });
-
-    secureServer.on('error', (err) => {
-      log.warn('https unavailable; the microphone will not work from a phone', {
-        port: options.tlsPort,
-        error: err.message,
-      });
-    });
-  }
-}
-
-/**
  * Release the room on the way out.
  *
  * SPEC.md §33 wants release always available; the case it does not name is Core itself
@@ -859,13 +920,13 @@ function shutdown(signal) {
 
   console.log('');
   log.warn(`${signal} — releasing the room before exit`);
+  ears.stop();
   voice.silence();
   commands.release('ALL', { source: 'shutdown' });
 
   // Give the writes a moment to reach the sockets, then go regardless.
   setTimeout(() => {
     observers.closeAll();
-    if (secureServer) secureServer.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();
   }, 400);
