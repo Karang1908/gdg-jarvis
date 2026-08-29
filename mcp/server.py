@@ -517,6 +517,7 @@ def voice_status() -> dict[str, Any]:
     result = _call("/api/voice")
     if result.get("error"):
         return {"ok": False, "error": result["error"]}
+    usage = result.get("usage") or {}
     return {
         "ok": True,
         "provider": result.get("provider"),
@@ -526,6 +527,11 @@ def voice_status() -> dict[str, Any]:
         "budget_ms": result.get("budgetMs"),
         "cached_lines": result.get("cached"),
         "personality": (result.get("personality") or {}).get("name"),
+        # Speech is the only thing in this system that spends the Gemini API key. You do
+        # not call Google; Core does, and only to say something out loud.
+        "api_calls_made": usage.get("calls", 0),
+        "api_calls_saved_by_cache": usage.get("saved", 0),
+        "rate_limited": usage.get("rateLimited", 0),
     }
 
 

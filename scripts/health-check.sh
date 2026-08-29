@@ -181,7 +181,16 @@ if [ -n "$voice" ]; then
         }
         if (v.cacheable) {
           console.log('  \x1b[32m✓\x1b[0m ' + v.cached + ' line(s) cached via ' + (v.player || 'no player'));
-          if (!v.cached) console.log('       run scripts/warm-voice.sh so the scripted lines need no network');
+        }
+
+        // The free tier is rate limited and speech is the only thing here that spends it.
+        const u = v.usage || {};
+        if (v.provider === 'gemini') {
+          console.log('  \x1b[32m✓\x1b[0m Gemini API: ' + (u.calls || 0) + ' call(s) this run, ' +
+                      (u.saved || 0) + ' avoided by the cache');
+          if (u.rateLimited) {
+            console.log('  \x1b[33m!\x1b[0m rate limited ' + u.rateLimited + ' time(s) — it fell back to the local voice');
+          }
         }
       } else {
         // Not fatal, but the demo is much flatter without it and the fix is one apt line.

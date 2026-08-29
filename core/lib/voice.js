@@ -46,6 +46,16 @@ const SYNTH_TIMEOUT_MS = 15_000;
 
 let config = {};
 let cacheDir = null;
+
+/**
+ * What the API key has actually been spent on.
+ *
+ * The free tier is rate limited, and the only thing in this system that touches it is
+ * speech — the MCP server never calls Google, and the AI client authenticates as itself.
+ * Counting here makes that claim checkable rather than something to take on trust, and
+ * makes the cache's value visible: `saved` is calls that were never made.
+ */
+const usage = { calls: 0, saved: 0, failed: 0, rateLimited: 0, lastError: null };
 let player = null;
 let chain = [];
 
@@ -117,6 +127,7 @@ const PROVIDERS = {
       return Boolean(apiKey());
     },
     async synth(text) {
+      usage.calls++;
       const settings = config.gemini || {};
       const model = settings.model || 'gemini-3.1-flash-tts-preview';
       const voice = settings.voice || 'Charon';
@@ -142,6 +153,19 @@ const PROVIDERS = {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
+        usage.failed++;
+        usage.lastError = `${response.status}`;
+
+        // 429 is the one worth naming. The chain already falls through to the local voice,
+        // so the demo keeps talking — but silently sounding worse for the rest of the
+        // evening, with no indication why, would be the wrong way to find out.
+        if (response.status === 429) {
+          usage.rateLimited++;
+          log.warn('Gemini rate limit reached; falling back to the local voice', {
+            calls_so_far: usage.calls,
+            note: 'cached lines are unaffected',
+          });
+        }
         throw new Error(`gemini ${response.status}: ${detail.slice(0, 160)}`);
       }
 
@@ -532,6 +556,7 @@ function describe() {
     cacheDir,
     cached: cacheDir ? countCached() : 0,
     cacheable: chain[0] ? PROVIDERS[chain[0]].kind === 'synth' : false,
+    usage: { ...usage },
     budgetMs: Number(config.budgetMs) || DEFAULT_BUDGET_MS,
     voice:
       chain[0] === 'gemini'
@@ -729,10 +754,13 @@ function synthesiseWithin(text, budgetMs) {
 async function deliver(text) {
   if (!chain.length) return { ok: false, error: 'no_provider' };
 
-  // Already have the audio. Nothing to decide.
   const requestedAt = Date.now();
 
+  // Already have the audio. Nothing to decide, and nothing spent — counted, because the
+  // free tier is rate limited and "calls the cache avoided" is the number that shows
+  // whether that is a problem worth worrying about.
   if (player && isCached(text)) {
+    if (chain[0] === 'gemini') usage.saved++;
     const result = await play(cachePath(text), requestedAt);
     return { ...result, source: 'cache' };
   }
