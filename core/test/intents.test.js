@@ -1,0 +1,117 @@
+'use strict';
+
+/**
+ * Intent matching tests.
+ *
+ * These decide what happens when the presenter opens their mouth, and they run before any
+ * model does — so a regression here is not a wrong answer, it is the room doing something
+ * nobody asked for in front of an audience.
+ *
+ * Two properties matter more than the individual phrasings:
+ *
+ *   1. Every command in the run of show matches. Missing one means a dead mic on stage.
+ *   2. Ordinary speech does NOT match. This is the harder half. The presenter talks for
+ *      minutes with the microphone open, and "take a look at this slide" must not be heard
+ *      as "take a look" and seize a laptop. A false positive is far worse than a miss: a
+ *      miss reaches the model, which is where an unrecognised sentence was always going.
+ *
+ *   node core/test/intents.test.js
+ */
+
+const intents = require('../lib/intents');
+
+/** Devices 1-3 exist, as they will in the demo. Anything else is not a device. */
+const resolve = (target) => ['1', '2', '3'].includes(String(target));
+
+let failures = 0;
+
+function check(name, condition, detail) {
+  if (condition) {
+    console.log(`  ✓ ${name}`);
+    return;
+  }
+  failures++;
+  console.log(`  ✗ ${name}${detail ? '\n      ' + detail : ''}`);
+}
+
+/** A phrase that must produce a given intent, with the fields that carry the meaning. */
+function matches(phrase, expected, fields) {
+  const found = intents.match(phrase, resolve);
+  const named = found && found.name === expected;
+  const carried = !fields || (found && Object.entries(fields).every(([key, value]) => {
+    const actual = key in found ? found[key] : (found.body || {})[key];
+    return JSON.stringify(actual) === JSON.stringify(value);
+  }));
+
+  check(
+    `"${phrase}" → ${expected}`,
+    named && carried,
+    found ? `got ${found.name} ${JSON.stringify(found.body || {})}` : 'matched nothing'
+  );
+}
+
+/** A phrase that must fall through to the model rather than fire a command. */
+function fallsThrough(phrase) {
+  const found = intents.match(phrase, resolve);
+  check(
+    `"${phrase}" → model`,
+    found === null,
+    found ? `WRONGLY matched ${found.name} ${JSON.stringify(found.body || {})}` : ''
+  );
+}
+
+console.log('\nCommands the demo depends on');
+matches('jarvis take the room', 'takeover_all', { target: 'ALL' });
+matches('take the room', 'takeover_all', { target: 'ALL' });
+matches('hey jarvis, take everything', 'takeover_all', { target: 'ALL' });
+matches('jarvis release the room', 'release_all', { target: 'ALL' });
+matches('jarvis, give back everything', 'release_all', { target: 'ALL' });
+matches('show me the architecture', 'scene', { scene: 'network', target: 'ALL' });
+matches('jarvis show the reactor', 'scene', { scene: 'reactor' });
+matches('switch to terminal', 'scene', { scene: 'terminal' });
+matches('jarvis take device two', 'takeover_device', { target: '2' });
+matches('jarvis identify three', 'identify', { target: '3' });
+matches('jarvis release device one', 'release_device', { target: '1' });
+matches('jarvis move to two', 'move', { to: '2' });
+matches('jarvis split yourself', 'split');
+matches('jarvis reactor sequence', 'cascade');
+matches('jarvis how many devices are online', 'count');
+
+console.log('\nHomophones a recogniser actually returns');
+// Not hypothetical. Chrome and whisper both return these for spoken digits, and refusing
+// them would make the demo feel broken for a reason the presenter cannot see or fix.
+matches('jarvis take too', 'takeover_device', { target: '2' });
+matches('jarvis identify won', 'identify', { target: '1' });
+matches('jarvis take tree', 'takeover_device', { target: '3' });
+
+console.log('\nOrdinary speech, which must never fire a command');
+// The scene list is checked before identify precisely so this one does not become
+// "identify the device called 'the'".
+fallsThrough('take a look at this slide');
+fallsThrough('so anyway MQTT is a lightweight protocol');
+fallsThrough('let me show you what happens next');
+fallsThrough('and this is where it gets interesting');
+fallsThrough('we should move on to the next section');
+fallsThrough('thanks everyone for coming today');
+fallsThrough('');
+fallsThrough('   ');
+
+console.log('\nDevices that do not exist');
+// Four is a perfectly good number; there is simply no device four. Handing this to the
+// model is right — it can say so, where a takeover of nothing cannot.
+fallsThrough('jarvis take device four');
+fallsThrough('jarvis identify seven');
+
+console.log('\nNumber words');
+check('spokenToNumber reads digits', intents.spokenToNumber('7') === 7);
+check('spokenToNumber reads words', intents.spokenToNumber('three') === 3);
+check('spokenToNumber reads homophones', intents.spokenToNumber('ate') === 8);
+check('spokenToNumber rejects a non-number', intents.spokenToNumber('slide') === null);
+check('spokenToNumber survives nothing', intents.spokenToNumber('') === null);
+
+if (failures === 0) {
+  console.log(`\nPASS  intents: every demo command matches, and ordinary speech does not\n`);
+} else {
+  console.error(`\nFAIL  ${failures} check(s)\n`);
+  process.exit(1);
+}
