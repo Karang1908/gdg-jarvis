@@ -267,9 +267,37 @@ rather than seizing a laptop. A false positive in front of an audience is far wo
 miss — a miss just costs the model round trip that unrecognised speech was always going to
 take.
 
-**Change, part three — the control.** A microphone toggle, closed by default. Whatever Core
-heard is pushed to the phone and displayed even when it matched nothing, because a live mic
-that did not recognise a phrase and a dead mic must never look the same.
+**Change, part three — the model path is gated by the name.** A fixed command needs no wake
+word: "take the room" works bare, because it is a closed set of phrases and it has to be
+instant. Free-form speech is the opposite — it is anything at all — so it reaches the model
+only when the utterance *begins* by addressing JARVIS.
+
+Without that gate, every sentence of a talk became a model call. The presenter speaks for
+half an hour with the microphone open; each stray sentence cost twelve to seventeen seconds
+of `agy`, could reach for the room's tools, and had its answer spoken aloud over them.
+
+The residual risk is stated rather than solved: this demo is *about* JARVIS, so a sentence
+genuinely beginning with the name reaches the model. Requiring the name at the start rather
+than anywhere is what keeps "the JARVIS core runs on Kali" out of it. Nothing short of
+push-to-talk closes the gap entirely.
+
+**Change, part four — nothing in the audio path blocks.** Two separate mistakes, both
+measured before they were fixed:
+
+Transcription ran through `spawnSync`, which halts Node completely. Core served nothing for
+2.5 seconds per utterance — no event stream, no commands, no health check.
+
+The capture loop awaited the handler, so while the model thought, the microphone heard
+nothing. "Take the room", said during those seventeen seconds, was never heard at all.
+
+Transcription is now an async spawn and the handler is dispatched without being awaited,
+which means two things must be guarded: only one model call runs at a time, and a transcript
+that finishes after the microphone was closed is dropped rather than acted on.
+
+**The control.** A microphone toggle, closed by default. Whatever Core heard is pushed to
+the phone and displayed with what became of it — acted on, being thought about, or ignored
+as not addressed — because a live mic that ignored you and a dead mic must never look the
+same.
 
 Separately, a **JARVIS-audible** toggle mutes JARVIS's speech. The two are deliberately
 distinct and worded so: the microphone is what JARVIS hears, the other is what it says. A
