@@ -136,6 +136,10 @@ const TRANSCRIBE = [
     /**
      * One call per utterance, not a stream — so this costs about what the speech synthesis
      * does and stays inside the same free tier.
+     *
+     * The model must be one that accepts audio input. An unknown or non-audio model is a
+     * 404 from this endpoint, which is how the first version of this failed: it named a
+     * model that does not exist, and every utterance died with a bare status code.
      */
     async run(file) {
       const audio = fs.readFileSync(file).toString('base64');
@@ -145,7 +149,7 @@ const TRANSCRIBE = [
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey() },
           body: JSON.stringify({
-            model: config.sttModel || process.env.JARVIS_STT_MODEL || 'gemini-3.1-flash',
+            model: sttModel(),
             input: [
               { type: 'text', text: 'Transcribe this audio exactly. Reply with only the words spoken, nothing else.' },
               { type: 'audio', mime_type: 'audio/wav', data: audio },
@@ -154,9 +158,24 @@ const TRANSCRIBE = [
           signal: AbortSignal.timeout(20_000),
         }
       );
-      if (!response.ok) throw new Error(`gemini ${response.status}`);
+
+      if (!response.ok) {
+        // Carry what Google actually said. A bare "gemini 404" names neither the model nor
+        // the reason, which is worth exactly nothing to whoever has to fix it.
+        const detail = await response.text().catch(() => '');
+        const said = (() => {
+          try {
+            return JSON.parse(detail).error.message;
+          } catch {
+            return detail.slice(0, 160);
+          }
+        })();
+        throw new Error(`gemini ${response.status} (model ${sttModel()}): ${said}`);
+      }
+
       const payload = await response.json();
-      return findText(payload) || '';
+      // Documented location first; the walker is insurance against the field moving.
+      return payload.output_text || findText(payload) || '';
     },
   },
 ];
@@ -179,6 +198,18 @@ function modelPath() {
 /** Which Python whisper model. tiny.en is the one that keeps up with a live demo. */
 function whisperSize() {
   return config.whisperModel || process.env.JARVIS_WHISPER_SIZE || 'tiny.en';
+}
+
+/**
+ * Which Gemini model transcribes.
+ *
+ * gemini-3.7-flash is the model the audio documentation's own transcription example uses
+ * against this endpoint, so it is the one default that is known to work. Only models that
+ * accept audio input are valid here — a text-only or unknown model is a 404, not a helpful
+ * error, which is how this broke the first time.
+ */
+function sttModel() {
+  return config.sttModel || process.env.JARVIS_STT_MODEL || 'gemini-3.7-flash';
 }
 
 /** Dig the text out without assuming one envelope shape; these APIs move. */
@@ -373,4 +404,6 @@ function stop() {
 
 const isListening = () => listening;
 
-module.exports = { init, start, stop, describe, isListening, MAX_UTTERANCE_S };
+// CAPTURE and TRANSCRIBE are exported the way intents.js exports INTENTS: so the provider
+// chains can be exercised directly, without needing a microphone or a network.
+module.exports = { init, start, stop, describe, isListening, MAX_UTTERANCE_S, CAPTURE, TRANSCRIBE };
