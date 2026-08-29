@@ -1,14 +1,12 @@
 {
-  "_comment": "Physical left-to-right order of the machines as the audience sees them, per SPEC.md §24. Cascade and staggered takeover walk this array so the effect appears to travel across the room. Reordering the laptops on the table is a config edit, never a code change.",
+  "_comment": "Physical left-to-right order of the machines as the audience sees them, per SPEC.md §24. Cascade and staggered takeover walk this so the effect appears to travel across the room.",
 
-  "order": ["ALPHA", "BETA", "GAMMA", "MAIN"],
+  "_order": "Device numbers, in the order the laptops physically sit. Leave it empty and devices sweep in numeric order, which is usually what you want since you can assign the numbers yourself from the controller. Fill it in only when the numbers do not match the seating.",
+  "order": [],
 
-  "_stepMs": "Milliseconds between adjacent nodes. 180 reads as a sweep; below ~90 it looks simultaneous, above ~400 it looks like lag.",
+  "_stepMs": "Milliseconds between adjacent devices. 180 reads as a sweep; below ~90 it looks simultaneous, above ~400 it looks like lag.",
   "stepMs": 180,
 
   "_takeoverStepMs": "Stagger for takeover(ALL). SPEC.md §17 suggests 180ms.",
-  "takeoverStepMs": 180,
-
-  "_homeNode": "Where JARVIS lives by default and where 'come back' returns it.",
-  "homeNode": "MAIN"
+  "takeoverStepMs": 180
 }

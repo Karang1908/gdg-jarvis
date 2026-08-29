@@ -15,30 +15,31 @@
  * magnitude below what an audience can see, and it does not accumulate over the evening.
  */
 
-let layout = { order: [], stepMs: 180, takeoverStepMs: 180, homeNode: 'MAIN' };
+let layout = { order: [], stepMs: 180, takeoverStepMs: 180 };
 
 function init(config) {
   layout = {
     order: Array.isArray(config.order) ? config.order : [],
     stepMs: Number(config.stepMs) || 180,
     takeoverStepMs: Number(config.takeoverStepMs) || Number(config.stepMs) || 180,
-    homeNode: config.homeNode || 'MAIN',
   };
   return layout;
 }
 
-function homeNode() {
-  return layout.homeNode;
-}
-
 /**
- * Physical position of a node, left to right as the audience sees it.
+ * Physical position of a device, left to right as the audience sees it.
  *
- * Unlisted nodes sort last. A machine someone added to nodes.json without updating the
- * layout should still animate; it just brings up the rear.
+ * With an empty `order` — the normal case — devices sweep in numeric order, which is
+ * usually right because the operator assigns those numbers deliberately. `order` exists for
+ * the room where the seating does not match the numbering and renumbering is not wanted.
+ *
+ * A device missing from a non-empty `order` sorts last rather than being dropped: a laptop
+ * that joined after the layout was written should still animate, just at the end.
  */
-function position(nodeId) {
-  const index = layout.order.indexOf(nodeId);
+function position(deviceId) {
+  if (!layout.order.length) return Number(deviceId) || 0;
+
+  const index = layout.order.findIndex((entry) => String(entry) === String(deviceId));
   return index === -1 ? layout.order.length : index;
 }
 
@@ -62,13 +63,15 @@ function sweepOrder(nodeIds, reverse = false) {
  *
  * Returns a Map of nodeId to delay in milliseconds.
  */
-function takeoverStagger(nodeIds) {
+function takeoverStagger(nodeIds, leadDevice = null) {
   const step = layout.takeoverStepMs;
-  const home = layout.homeNode;
 
-  // MAIN first if it is in the set, then the rest in physical order.
-  const rest = sweepOrder(nodeIds.filter((id) => id !== home));
-  const sequence = nodeIds.includes(home) ? [home, ...rest] : rest;
+  // The lead goes first — normally the device showing the Command Wall, because the
+  // audience is already looking at it. The rest follow in physical order, which is what
+  // makes it read as propagation rather than as four screens loading slowly.
+  const lead = nodeIds.find((id) => String(id) === String(leadDevice));
+  const rest = sweepOrder(nodeIds.filter((id) => String(id) !== String(leadDevice)));
+  const sequence = lead !== undefined ? [lead, ...rest] : rest;
 
   const delays = new Map();
   sequence.forEach((id, index) => delays.set(id, index * step));
@@ -152,7 +155,6 @@ function broadcastStagger(nodeIds) {
 
 module.exports = {
   init,
-  homeNode,
   position,
   sweepOrder,
   takeoverStagger,

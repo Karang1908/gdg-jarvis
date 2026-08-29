@@ -186,6 +186,20 @@ function wallDevice() {
   return null;
 }
 
+/**
+ * Where JARVIS currently appears.
+ *
+ * The device showing a JARVIS scene, if one is; otherwise the wall. Used as the default
+ * source for a move, so "move to three" means "from wherever you are" rather than from a
+ * fixed machine that may not even be the one showing it.
+ */
+function jarvisDevice() {
+  for (const device of devices.values()) {
+    if (device.online && (device.scene === 'jarvis' || device.scene === 'wall')) return device;
+  }
+  return wallDevice();
+}
+
 function isWall(number) {
   const wall = wallDevice();
   return Boolean(wall && wall.number === Number(number));
@@ -506,6 +520,7 @@ module.exports = {
   renumber,
   claimWall,
   wallDevice,
+  jarvisDevice,
   isWall,
   sessionValid,
   attachAgent,

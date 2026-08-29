@@ -476,11 +476,29 @@ router.post('/api/move', async (req, res, context) => {
   const body = await readBody(req);
   if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
 
-  const from = String(body.from || choreography.homeNode()).toUpperCase();
-  const to = String(body.to || '').toUpperCase();
-  if (!registry.has(to)) return json(res, 400, { ok: false, error: 'node_unknown' });
+  const destination = registry.resolve(body.to);
+  if (!destination.ok || destination.all) {
+    return json(res, 400, { ok: false, error: destination.reason || 'device_unknown' });
+  }
 
-  json(res, 200, commands.move(from, to, { source: 'api' }));
+  // Default source is wherever JARVIS actually is, so "move to three" means "from where you
+  // are" rather than from a fixed machine that may not be the one showing it.
+  let from = null;
+  if (body.from) {
+    const source = registry.resolve(body.from);
+    if (!source.ok || source.all) return json(res, 400, { ok: false, error: 'device_unknown' });
+    from = source.number;
+  } else {
+    const here = registry.jarvisDevice();
+    from = here ? here.number : null;
+  }
+
+  if (from === null) return json(res, 400, { ok: false, error: 'jarvis_is_nowhere' });
+  if (from === destination.number) {
+    return json(res, 200, { ok: true, from, to: from, dispatched: [], skipped: [], note: 'already there' });
+  }
+
+  json(res, 200, commands.move(from, destination.number, { source: 'api' }));
 });
 
 router.post('/api/cascade', async (req, res, context) => {

@@ -314,7 +314,10 @@ function takeover(target, auth, context, resumeScene = null) {
 
   // A resume is one node coming back, not a room-wide cue, so it skips the stagger and
   // reopens immediately into the scene it was already showing.
-  const stagger = resumeScene ? new Map() : choreography.takeoverStagger(reachable);
+  const wall = registry.wallDevice();
+  const stagger = resumeScene
+    ? new Map()
+    : choreography.takeoverStagger(reachable, wall ? wall.number : null);
 
   const perNode = new Map();
   for (const nodeId of reachable) {
@@ -358,7 +361,7 @@ function scene(target, sceneName, context, extraArgs = {}) {
 
 /** Split JARVIS across every screen at once (§23). */
 function broadcast(sceneName, context) {
-  const online = registry.onlineNodes().map((node) => node.id);
+  const online = registry.onlineDevices().map((device) => device.number);
   const stagger = choreography.broadcastStagger(online);
 
   const perNode = new Map();
@@ -416,7 +419,7 @@ function move(fromNodeId, toNodeId, context) {
 
 /** Run a beam across the room (§24). */
 function cascade(effect, context, reverse = false) {
-  const online = registry.onlineNodes().map((node) => node.id);
+  const online = registry.onlineDevices().map((device) => device.number);
   const plan = choreography.cascadePlan(online, reverse);
 
   const perNode = new Map();
