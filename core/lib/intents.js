@@ -136,4 +136,34 @@ function match(transcript, resolveDevice) {
   return null;
 }
 
-module.exports = { match, spokenToNumber, INTENTS, WORD_NUMBERS };
+/**
+ * Names a recogniser actually returns for "JARVIS".
+ *
+ * Not a stylistic list. Whisper and Chrome both mangle proper nouns, and being deaf to
+ * "jervis" would look identical to being deaf full stop.
+ */
+const NAMES = 'jarvis|jarvas|jervis|javis|jarviss|darvis';
+
+/**
+ * Is this utterance addressed to JARVIS?
+ *
+ * The gate on the model path, and the reason it exists: the microphone stays open while
+ * the presenter talks to a room full of people. Without this, every sentence of a talk
+ * became a twelve-second model call that could reach for the room's tools, and the answers
+ * were spoken aloud over the presenter.
+ *
+ * Required at the start, the way every other assistant does it — a name at the front is
+ * how people address things, and it is predictable enough to teach in one sentence before
+ * going on stage.
+ *
+ * Note the residual risk: this demo is *about* JARVIS, so a sentence that genuinely begins
+ * with the name ("JARVIS runs on the Kali machine") does reach the model. Nothing short of
+ * push-to-talk closes that, and the fixed commands do not depend on this gate at all.
+ */
+const ADDRESS = new RegExp(`^(?:hey\\s+|ok(?:ay)?\\s+)?(?:${NAMES})\\b`, 'i');
+
+function addressed(transcript) {
+  return ADDRESS.test(String(transcript || '').trim().replace(/^[,.\s]+/, ''));
+}
+
+module.exports = { match, addressed, spokenToNumber, INTENTS, WORD_NUMBERS };
