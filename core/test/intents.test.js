@@ -102,6 +102,35 @@ console.log('\nDevices that do not exist');
 fallsThrough('jarvis take device four');
 fallsThrough('jarvis identify seven');
 
+console.log('\nAddressing JARVIS');
+// The gate on the model path. The microphone is open while the presenter talks to a room,
+// so anything not addressed to JARVIS must never reach agy — each one is a twelve-second
+// call that can reach for the room's tools and speaks its answer out loud.
+function addresses(phrase, expected) {
+  check(
+    `${expected ? 'addressed' : 'ignored  '}  "${phrase}"`,
+    intents.addressed(phrase) === expected
+  );
+}
+addresses('jarvis what is on device two', true);
+addresses('hey jarvis, what is on device two', true);
+addresses('ok jarvis how many are online', true);
+addresses('okay jarvis take a look', true);
+// Recognisers mangle proper nouns; being deaf to these looks identical to being deaf.
+addresses('jervis what is happening', true);
+addresses('javis are you there', true);
+// Ordinary presenting. None of this is for JARVIS.
+addresses('so anyway MQTT is a lightweight protocol', false);
+addresses('let me show you what happens next', false);
+addresses('and this is where it gets interesting', false);
+addresses('we should move on to the next section', false);
+addresses('thanks everyone for coming today', false);
+addresses('', false);
+// The name has to be the address, not merely present — this demo is *about* JARVIS, and
+// the presenter will say the word constantly while explaining how it works.
+addresses('the jarvis core runs on kali', false);
+addresses('what makes jarvis interesting is the wire protocol', false);
+
 console.log('\nNumber words');
 check('spokenToNumber reads digits', intents.spokenToNumber('7') === 7);
 check('spokenToNumber reads words', intents.spokenToNumber('three') === 3);
