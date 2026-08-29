@@ -13,6 +13,9 @@ core/cache/
 # beside it is not: it holds the admin password, which must never reach the repository.
 .agents/mcp_config.json
 
+# A self-signed certificate, generated per machine for whatever addresses it has.
+core/config/tls/
+
 # Runtime state
 core/logs/
 *.log

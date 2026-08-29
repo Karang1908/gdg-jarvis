@@ -17,12 +17,14 @@
 
 const fsp = require('fs');
 const http = require('http');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 
 const ask = require('./lib/ask');
 const env = require('./lib/env');
 const personality = require('./lib/personality');
+const tls = require('./lib/tls');
 
 const auth = require('./lib/auth');
 const bus = require('./lib/bus');
@@ -52,6 +54,8 @@ function parseArgs(argv) {
     layout: path.join(__dirname, 'config', 'layout.json'),
     personality: path.join(__dirname, 'config', 'personality.md'),
     memory: path.join(__dirname, 'config', 'memory.md'),
+    tlsDir: path.join(__dirname, 'config', 'tls'),
+    tlsPort: 3443,
     phrases: path.join(__dirname, 'config', 'phrases.json'),
     env: path.join(__dirname, '..', '.env'),
   };
@@ -80,6 +84,13 @@ function parseArgs(argv) {
         break;
       case '--memory':
         options.memory = path.resolve(value);
+        break;
+      case '--tls-port':
+        options.tlsPort = Number(value);
+        break;
+      case '--no-tls':
+        options.tlsPort = 0;
+        i -= 1; // flag takes no value
         break;
       case '--phrases':
         options.phrases = path.resolve(value);
@@ -789,6 +800,49 @@ server.on('error', (err) => {
 });
 
 /**
+ * The same Core, over https.
+ *
+ * Only so browsers will allow the microphone — speech recognition needs a secure context,
+ * and a phone loading http://10.42.0.1:3000 does not have one. The certificate is
+ * self-signed, so the browser warns once and then remembers.
+ *
+ * Plain http keeps serving on its usual port for the agents, which use curl and PowerShell
+ * and should not need a flag to trust anything.
+ */
+let secureServer = null;
+
+if (options.tlsPort > 0) {
+  const certificate = tls.ensure(options.tlsDir);
+
+  if (certificate.ok) {
+    secureServer = https.createServer({ key: certificate.key, cert: certificate.cert }, (req, res) => {
+      router.handle(req, res).catch((err) => {
+        log.error('request handler threw', { path: req.url, error: err.message });
+        if (!res.headersSent) json(res, 500, { ok: false, error: 'internal_error' });
+      });
+    });
+
+    secureServer.keepAliveTimeout = 0;
+    secureServer.headersTimeout = 0;
+    secureServer.requestTimeout = 0;
+
+    secureServer.listen(options.tlsPort, options.host, () => {
+      const where = origin.replace(/^http:/, 'https:').replace(`:${options.port}`, `:${options.tlsPort}`);
+      console.log('    microphone  ' + where + '/control/');
+      console.log('                (accept the certificate warning once — it is self-signed)');
+      console.log('');
+    });
+
+    secureServer.on('error', (err) => {
+      log.warn('https unavailable; the microphone will not work from a phone', {
+        port: options.tlsPort,
+        error: err.message,
+      });
+    });
+  }
+}
+
+/**
  * Release the room on the way out.
  *
  * SPEC.md §33 wants release always available; the case it does not name is Core itself
@@ -811,6 +865,7 @@ function shutdown(signal) {
   // Give the writes a moment to reach the sockets, then go regardless.
   setTimeout(() => {
     observers.closeAll();
+    if (secureServer) secureServer.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();
   }, 400);
