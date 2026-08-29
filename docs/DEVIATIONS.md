@@ -231,31 +231,55 @@ guess.
 
 ---
 
-## D10 — Voice input is local, and the microphone is a control
+## D10 — The microphone is on Core, and the phone is a remote
 
 **Spec:** §30 puts natural language entirely in the LLM, reached through MCP.
 
-**Problem:** two things. The LLM path needs internet and adds a round trip to moments that
-have to be instant; and nothing in the spec lets the presenter stop the system listening,
-even though they spend most of the demo talking to an audience rather than to JARVIS.
+**Problem:** three things. The LLM path needs internet and adds a round trip to moments
+that have to be instant; nothing in the spec lets the presenter stop the system listening,
+even though they spend most of the demo talking to an audience rather than to JARVIS; and
+the spec never says *where* the microphone is.
 
-**Change, part one:** the controller does its own speech recognition and matches it against
-a fixed list of phrases in the browser. No model, no server round trip, no LLM in the path.
-It cannot invent a command that was never spoken, and it keeps working when the AI layer
-does not. The MCP path remains, unchanged, for anything richer.
+**Change, part one — where it listens.** The microphone is on the machine running Core,
+next to the speakers and the model. It is not on the phone.
 
-**Change, part two:** a microphone toggle, closed by default and closed again the moment it
-is tapped. The icon carries a slash at rest so its state is legible without reading the
-label, and whatever was heard is displayed even when it matched nothing — because a live
-mic that did not recognise a phrase and a dead mic must never look the same.
+This was built the other way first, with the browser doing the listening, and that was
+wrong. It put recognition on whichever handset happened to be holding the page, which meant
+the room's ability to hear depended on a phone's position, its browser, and a secure
+context — a plain-http page gets no microphone at all, so an earlier version shipped a
+self-signed certificate purely to work around that. All of it disappears once the
+microphone lives where the rest of the system already does. Core hears, transcribes,
+decides, and speaks; the certificate, the https listener, and the browser recogniser are
+gone.
+
+The phone keeps the mic button, and it does what the presenter thinks it does — it opens
+and closes the microphone. Just not a microphone in the phone.
+
+**Change, part two — what it does without a model.** A transcript is matched against a
+fixed list of phrases in `core/lib/intents.js` before any model is involved. No round trip,
+no LLM in the path, and it cannot invent a command that was never spoken. Anything that
+does not match goes to `agy`, which reasons about it and calls the room's MCP tools. Two
+speeds, and the fast one is the one the demo leans on.
+
+Matching is deliberately conservative about what counts as a command. A device reference
+that names no real device does not match, so "take a look at this slide" reaches the model
+rather than seizing a laptop. A false positive in front of an audience is far worse than a
+miss — a miss just costs the model round trip that unrecognised speech was always going to
+take.
+
+**Change, part three — the control.** A microphone toggle, closed by default. Whatever Core
+heard is pushed to the phone and displayed even when it matched nothing, because a live mic
+that did not recognise a phrase and a dead mic must never look the same.
 
 Separately, a **JARVIS-audible** toggle mutes JARVIS's speech. The two are deliberately
-distinct and worded so: the microphone is the presenter's, the other is JARVIS's voice. A
+distinct and worded so: the microphone is what JARVIS hears, the other is what it says. A
 muted device still executes everything; it simply makes no sound, and reports `muted` as a
 skip reason so the wall shows why rather than swallowing it.
 
-**Honest limitation:** Chrome performs speech recognition in the cloud, so the microphone
-needs the presenter's tethered internet. Everything else on the controller works with none.
+**Honest limitation:** transcription quality is whatever is installed on Core. Local
+whisper is good and needs no network; with neither whisper nor sox present, Core falls back
+to fixed-length recording windows and cloud transcription, which is worse on both counts
+and says so in the log rather than quietly sounding broken.
 
 ---
 
