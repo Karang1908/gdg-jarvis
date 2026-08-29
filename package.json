@@ -9,9 +9,11 @@
   },
   "scripts": {
     "start": "node core/server.js",
-    "test": "node core/test/wire.test.js",
-    "health": "bash scripts/health-check.sh"
+    "test": "bash scripts/test.sh",
+    "health": "bash scripts/health-check.sh",
+    "test:wire": "node core/test/wire.test.js",
+    "test:api": "node core/test/api.test.js"
   },
-  "_dependencies": "There are none, on purpose. During the demo the Kali machine's Wi-Fi is the access point, so it has no internet — a Core that needs `npm install` is a Core that can fail to start at the venue. See docs/DEVIATIONS.md D1.",
+  "_dependencies": "There are none, on purpose. During the demo the Kali machine's Wi-Fi is the access point, so it has no internet \u2014 a Core that needs `npm install` is a Core that can fail to start at the venue. See docs/DEVIATIONS.md D1.",
   "dependencies": {}
 }
