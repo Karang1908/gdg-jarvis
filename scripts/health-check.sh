@@ -173,12 +173,22 @@ if [ -n "$voice" ]; then
       const v = JSON.parse(raw);
 
       if (v.available) {
-        console.log('  \x1b[32m✓\x1b[0m voice: ' + v.backend + (v.voice ? ' / ' + v.voice : '') +
-                    (v.enabled ? '' : '  \x1b[33m(muted)\x1b[0m'));
+        const how = v.provider + (v.voice ? ' / ' + v.voice : '');
+        console.log('  \x1b[32m✓\x1b[0m voice: ' + how + (v.enabled ? '' : '  \x1b[33m(muted)\x1b[0m'));
+
+        // The distinction that decides how the demo sounds. A robotic fallback still
+        // counts as 'available', so saying only that would hide the thing worth knowing.
+        if (!v.natural) {
+          console.log('  \x1b[33m!\x1b[0m that is the fallback voice — set GEMINI_API_KEY or install piper');
+        }
+        if (v.cacheable) {
+          console.log('  \x1b[32m✓\x1b[0m ' + v.cached + ' line(s) cached via ' + (v.player || 'no player'));
+          if (!v.cached) console.log('       run scripts/warm-voice.sh so the scripted lines need no network');
+        }
       } else {
         // Not fatal, but the demo is much flatter without it and the fix is one apt line.
-        console.log('  \x1b[33m!\x1b[0m no speech backend here — JARVIS will be silent');
-        console.log('       sudo apt install speech-dispatcher espeak-ng');
+        console.log('  \x1b[33m!\x1b[0m no voice here — JARVIS will be silent');
+        console.log('       sudo apt install speech-dispatcher espeak-ng   # or set GEMINI_API_KEY');
       }
 
       const p = v.personality || {};
