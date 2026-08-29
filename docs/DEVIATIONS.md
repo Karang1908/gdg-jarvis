@@ -350,13 +350,25 @@ speak(text)
         └── say / spd-say / espeak            ──┘
 ```
 
-The cache is the part that matters. Almost every line the demo needs is known in advance —
-they are listed in `core/config/phrases.json`, which is also what the controller's buttons
-read — so `scripts/warm-voice.sh` generates them all once, ahead of time, with the best
-provider available. At showtime those are files. No latency that depends on a network, and
-**the scripted beats keep their good voice even if the tether drops entirely**. Only lines
-the model invents on the spot reach a provider live, and if that call fails the chain falls
-through to something local rather than going silent.
+The ordinary path is a live call: a line comes in, it is synthesised, it is played. Two
+things sit on top of that and neither is something to think about.
+
+**A latency budget.** A live call that has not produced audio within `budgetMs` — one
+second by default — is abandoned, and the local voice speaks instead. A demo has a rhythm;
+asking JARVIS a question and waiting three seconds reads as broken even when it is working
+perfectly. The abandoned call is deliberately *not* cancelled: it finishes in the background
+and its audio is kept, so the same line is right next time. Being late is a reason to stop
+waiting, not a reason to throw away work that is nearly done.
+
+The fallback is chosen by a `network` flag on each provider rather than by name. Excluding
+only "gemini" would mean any future cloud backend fell back to itself, which is not a
+fallback — it just pays the same latency twice. That was a real bug, caught by a test with a
+deliberately slow stand-in provider.
+
+**A cache**, which is simply "do not pay for the same line twice". It fills itself as JARVIS
+talks; nothing has to be run for it to work. `scripts/warm-voice.sh` exists to fill it ahead
+of time from `core/config/phrases.json` if a venue's connection is bad, but it is an
+optimisation for a known-bad network, not a step in the setup.
 
 Gemini's style prompt is what justifies the call at all: the model is told *how* to deliver
 a line, not merely what to say, so "Yes, sir" comes out measured and dry. No concatenative
@@ -366,10 +378,17 @@ The cache key includes the provider, voice, model and style prompt, so changing 
 produces fresh audio. Without that, editing the style prompt and hearing no difference would
 lead straight to the conclusion that the setting does nothing.
 
-**Measured, not assumed:** a cached line still costs the audio player's startup — about
-700ms for `afplay` on macOS, which a warm-up does not reduce because it is a fixed cost in
-the binary. `paplay` on Linux is expected to be lighter, and `scripts/warm-voice.sh` prints
-the real number on whatever machine it runs on rather than leaving it to be discovered.
+**Measured, not assumed.** Time to first sound, which is the number a presenter feels:
+
+| | |
+| --- | --- |
+| cached line | ~0 ms |
+| live synthesis, local voice | ~470 ms |
+| live synthesis, cloud | network round trip, capped at `budgetMs` |
+
+An earlier version of this note claimed ~700ms of unavoidable player overhead. That was
+wrong: it measured the player process's whole lifetime, which is dominated by how long the
+line takes to *say*. Spawning the player and reaching first sound is effectively immediate.
 
 ---
 
