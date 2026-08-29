@@ -3,24 +3,21 @@
 /**
  * JARVIS's voice.
  *
- * One presence, one voice, coming from the machine that runs Core — see DEVIATIONS.md D11.
- * This file is about making that voice good enough to carry a room, without making the
- * demo depend on a network call landing in time.
+ * One presence, one voice, from the machine that runs Core — see DEVIATIONS.md D11.
  *
- * The shape that solves it is a cache in front of a provider chain:
+ * Ordinary path: a line comes in, it is synthesised, it is played. Gemini if there is a
+ * key, Piper if it is installed, the platform's own voice otherwise.
  *
- *     speak(text)
- *       ├── cached?  ── play the file                    instant, no network
- *       └── not cached
- *             ├── gemini   natural, needs internet ──┐
- *             ├── piper    natural, local, fast    ──┤── write to cache ── play
- *             └── say / spd-say / espeak            ──┘   (spoken directly)
+ * Two things sit on top of that, and neither is something to think about.
  *
- * Almost every line the demo needs is known in advance, so `scripts/warm-voice.sh`
- * generates them all once with the best provider available and leaves the audio on disk.
- * At showtime those play from a file: no latency, no tether, no failure mode. Only lines
- * the model invents on the spot reach a provider live, and if that call fails the chain
- * falls through to something local rather than going silent.
+ * **A latency budget.** A live call that has not produced audio within the budget is
+ * abandoned and the local voice speaks instead. JARVIS sounding a little flat is better
+ * than JARVIS pausing for three seconds in front of a room. The abandoned call is left to
+ * finish in the background and its audio is kept, so the same line is right next time.
+ *
+ * **A cache**, which is simply "do not pay for the same line twice". It fills itself as
+ * JARVIS talks. Nothing has to be run for it to work, and a repeated line — "Yes, sir"
+ * five times in one demo — costs one synthesis rather than five.
  *
  * Nothing here builds a shell command from text. Every provider is spawned with an
  * argument array, because the text may have come from a language model.
@@ -34,6 +31,17 @@ const { spawn, spawnSync } = require('child_process');
 const log = require('./log');
 
 const SPEECH_TIMEOUT_MS = 10_000;
+
+/**
+ * How long a live synthesis may take before the local voice takes over.
+ *
+ * A demo has a rhythm. Asking JARVIS a question and waiting three seconds reads as broken
+ * even when it is working perfectly, so the budget is deliberately tight and the fallback
+ * is automatic rather than something the operator has to notice and fix.
+ */
+const DEFAULT_BUDGET_MS = 1000;
+
+/** The hard ceiling on a background call, once the budget has already been given up on. */
 const SYNTH_TIMEOUT_MS = 15_000;
 
 let config = {};
@@ -101,6 +109,10 @@ const PROVIDERS = {
    */
   gemini: {
     kind: 'synth',
+    // Whether this provider can be slow for reasons outside this machine. Used to choose
+    // a fallback when the budget is blown — naming one provider instead would mean any
+    // future cloud backend silently falls back to itself.
+    network: true,
     available() {
       return Boolean(apiKey());
     },
@@ -375,8 +387,34 @@ function findPlayer() {
  * Setup
  * --------------------------------------------------------------------------------- */
 
+/**
+ * Merge the environment over the config file.
+ *
+ * Env wins, so a `.env` or an exported variable is the quick way to change how JARVIS
+ * sounds without editing JSON — and so an API key never has to be written into a file that
+ * lives next to the code.
+ */
+function resolve(options) {
+  const merged = JSON.parse(JSON.stringify(options || {}));
+  const env = process.env;
+
+  merged.gemini = merged.gemini || {};
+  merged.piper = merged.piper || {};
+
+  if (env.JARVIS_VOICE_PROVIDER) merged.provider = env.JARVIS_VOICE_PROVIDER;
+  if (env.JARVIS_STYLE) merged.style = env.JARVIS_STYLE;
+  if (env.JARVIS_VOICE) merged.gemini.voice = env.JARVIS_VOICE;
+  if (env.JARVIS_GEMINI_MODEL) merged.gemini.model = env.JARVIS_GEMINI_MODEL;
+  if (env.JARVIS_PIPER_MODEL) merged.piper.model = env.JARVIS_PIPER_MODEL;
+
+  const budget = Number(env.JARVIS_VOICE_BUDGET_MS);
+  if (Number.isFinite(budget) && budget > 0) merged.budgetMs = budget;
+
+  return merged;
+}
+
 function init(options = {}) {
-  config = options || {};
+  config = resolve(options);
   enabled = config.enabled !== false;
 
   cacheDir = path.resolve(config.cacheDir || path.join(__dirname, '..', 'cache', 'voice'));
@@ -451,6 +489,7 @@ function describe() {
     cacheDir,
     cached: cacheDir ? countCached() : 0,
     cacheable: chain[0] ? PROVIDERS[chain[0]].kind === 'synth' : false,
+    budgetMs: Number(config.budgetMs) || DEFAULT_BUDGET_MS,
     voice:
       chain[0] === 'gemini'
         ? (config.gemini || {}).voice || 'Charon'
@@ -464,10 +503,16 @@ function describe() {
  * Speaking
  * --------------------------------------------------------------------------------- */
 
-function play(file) {
+function play(file, startedAt) {
   return new Promise((resolve) => {
+    const spawnedAt = Date.now();
     const child = spawn(player.command, player.args(file), { stdio: 'ignore' });
     current = child;
+
+    // The player has the file open and is about to make a noise. Close enough to
+    // "first sound" to be the number worth reporting, and far more useful than the
+    // moment the audio *finishes*, which is dominated by how long the line is.
+    const firstSoundMs = startedAt ? spawnedAt - startedAt : null;
 
     const done = (result) => {
       if (current === child) current = null;
@@ -486,7 +531,7 @@ function play(file) {
     guard.unref();
 
     child.on('error', (err) => done({ ok: false, error: err.message }));
-    child.on('exit', () => done({ ok: true }));
+    child.on('exit', () => done({ ok: true, firstSoundMs }));
   });
 }
 
@@ -551,20 +596,91 @@ async function synthesise(text) {
   return null;
 }
 
+/**
+ * The best thing available that does not depend on a network.
+ *
+ * Chosen by the provider's own `network` flag rather than by name. Excluding only
+ * "gemini" would mean any other network-backed provider fell back to itself, which is not
+ * a fallback at all — it just pays the same latency twice.
+ */
+function localFallback() {
+  return chain.find((name) => !PROVIDERS[name].network) || null;
+}
+
+/**
+ * Synthesise, but give up after the budget.
+ *
+ * The abandoned promise is deliberately not cancelled — it is left to finish and write to
+ * the cache. The first time a novel line is slow you hear the local voice; every time
+ * after that, the good one is already on disk. Being late is a reason to stop *waiting*,
+ * not a reason to throw away work that is nearly done.
+ */
+function synthesiseWithin(text, budgetMs) {
+  const work = synthesise(text);
+
+  // Keep the background write alive without letting a rejection become unhandled.
+  work.catch(() => {});
+
+  return Promise.race([
+    work.then((made) => ({ made })),
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ timedOut: true }), budgetMs);
+      timer.unref();
+    }),
+  ]);
+}
+
 async function deliver(text) {
   if (!chain.length) return { ok: false, error: 'no_provider' };
 
-  // The fast path, and the one the demo actually runs on.
+  // Already have the audio. Nothing to decide.
+  const requestedAt = Date.now();
+
   if (player && isCached(text)) {
-    const result = await play(cachePath(text));
+    const result = await play(cachePath(text), requestedAt);
     return { ...result, source: 'cache' };
   }
 
+  const budgetMs = Number(config.budgetMs) || DEFAULT_BUDGET_MS;
+
   if (player) {
-    const made = await synthesise(text);
-    if (made) {
-      const result = await play(made.file);
-      return { ...result, source: made.provider || 'cache' };
+    const started = Date.now();
+    const outcome = await synthesiseWithin(text, budgetMs);
+
+    if (outcome.made) {
+      const synthMs = Date.now() - started;
+      const result = await play(outcome.made.file, requestedAt);
+      return { ...result, source: outcome.made.provider || 'cache', synthMs };
+    }
+
+    if (outcome.timedOut) {
+      const local = localFallback();
+      log.warn('voice took longer than the budget; using the local voice', {
+        budget_ms: budgetMs,
+        falling_back_to: local || 'nothing',
+        note: 'the slow one is still being cached for next time',
+      });
+
+      if (local && PROVIDERS[local].kind === 'direct') {
+        const result = await speakDirect(local, text);
+        return { ...result, source: local, overBudget: true };
+      }
+      if (local && PROVIDERS[local].kind === 'synth') {
+        const made = await PROVIDERS[local]
+          .synth(text)
+          .then((audio) => {
+            const file = path.join(cacheDir, `.fallback-${Date.now()}.wav`);
+            fs.writeFileSync(file, audio);
+            return file;
+          })
+          .catch(() => null);
+
+        if (made) {
+          const result = await play(made, requestedAt);
+          fs.unlink(made, () => {});
+          return { ...result, source: local, overBudget: true };
+        }
+      }
     }
   }
 
