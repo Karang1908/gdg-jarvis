@@ -23,6 +23,37 @@
   var Recognition = global.SpeechRecognition || global.webkitSpeechRecognition;
 
   /**
+   * Why the microphone cannot be used, or null if it can.
+   *
+   * Browsers gate speech recognition on a secure context: https, or localhost. A page
+   * served over plain http from a LAN address — which is exactly what a phone loads from
+   * `http://10.42.0.1:3000` — gets no permission prompt and no error, it simply never
+   * hears anything.
+   *
+   * That silent failure is worse than the limitation. Naming it is the difference between
+   * "the mic is broken" and "open the https address instead".
+   */
+  function unavailableReason() {
+    if (!global.isSecureContext) {
+      return {
+        code: 'insecure',
+        short: 'MIC NEEDS HTTPS',
+        detail:
+          'Browsers only allow the microphone over https or on localhost. Open the https:// ' +
+          'address of this page instead — Core serves one.',
+      };
+    }
+    if (!Recognition) {
+      return {
+        code: 'unsupported',
+        short: 'NO MIC SUPPORT',
+        detail: 'This browser has no speech recognition. Chrome or Edge do.',
+      };
+    }
+    return null;
+  }
+
+  /**
    * Intents, in match order.
    *
    * Deliberately a list of regular expressions rather than anything cleverer. Every phrase
@@ -252,14 +283,16 @@
     }
 
     return {
-      available: Boolean(Recognition),
+      available: !unavailableReason(),
+      unavailable: unavailableReason(),
 
       isOn: function () {
         return wantListening;
       },
 
       start: function () {
-        if (!Recognition) return handlers.state('unavailable');
+        var blocked = unavailableReason();
+        if (blocked) return handlers.state('unavailable', blocked);
         if (!recognition) recognition = build();
 
         wantListening = true;

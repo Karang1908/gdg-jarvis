@@ -434,7 +434,7 @@
    * Microphone
    * ------------------------------------------------------------------------------- */
 
-  function micState(state) {
+  function micState(state, reason) {
     micButton.classList.remove('is-on', 'is-denied', 'is-unavailable');
     micButton.setAttribute('aria-pressed', String(state === 'listening'));
 
@@ -447,7 +447,10 @@
       report('microphone permission was refused — allow it in the browser and tap again', 'warn');
     } else if (state === 'unavailable') {
       micButton.classList.add('is-unavailable');
-      micLabel.textContent = 'NO MIC';
+      micLabel.textContent = (reason && reason.short) || 'NO MIC';
+      // Say why, in the place the presenter is already looking. A greyed-out button with no
+      // explanation is how someone concludes the whole feature is broken.
+      if (reason && reason.detail) report(reason.detail, 'warn');
     } else {
       micLabel.textContent = 'MIC OFF';
       voiceHeard.textContent = '';
@@ -517,7 +520,7 @@
     });
 
     if (!voice.available) {
-      micState('unavailable');
+      micState('unavailable', voice.unavailable);
       micButton.disabled = true;
       return;
     }
