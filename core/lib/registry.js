@@ -344,6 +344,72 @@ function supports(number, capability) {
   return device.capabilities.includes(capability);
 }
 
+/**
+ * Give a device a different number.
+ *
+ * Swap rather than insert-and-shift. Shifting would renumber machines nobody touched,
+ * which is the one thing this registry promises not to do — the presenter has already said
+ * "identify three" out loud and cannot have that mean a different laptop a minute later.
+ * A swap moves exactly two devices and is its own undo.
+ *
+ * If the destination number is free the device simply moves into it.
+ *
+ * The fingerprint map is updated on both sides, so the assignment survives a reconnect. A
+ * laptop the operator deliberately made device 1 must still be device 1 after it drops off
+ * the Wi-Fi and comes back, or the manual assignment was pointless.
+ */
+function renumber(fromNumber, toNumber) {
+  const from = Number(fromNumber);
+  const to = Number(toNumber);
+
+  if (!Number.isInteger(to) || to < 1 || to > 999) {
+    return { ok: false, reason: 'number_out_of_range' };
+  }
+  if (from === to) return { ok: true, from, to, swappedWith: null };
+
+  const moving = devices.get(from);
+  if (!moving) return { ok: false, reason: 'device_unknown' };
+
+  const displaced = devices.get(to) || null;
+
+  devices.delete(from);
+  if (displaced) devices.delete(to);
+
+  moving.number = to;
+  devices.set(to, moving);
+  fingerprints.set(moving.fingerprint, to);
+
+  if (displaced) {
+    displaced.number = from;
+    devices.set(from, displaced);
+    fingerprints.set(displaced.fingerprint, from);
+  }
+
+  // Keep numeric order, so the wall and the controller list 1, 2, 3 rather than the order
+  // the swaps happened in.
+  const ordered = [...devices.entries()].sort((a, b) => a[0] - b[0]);
+  devices.clear();
+  for (const [number, device] of ordered) devices.set(number, device);
+
+  // A number handed out manually must not be handed out again to the next machine to join.
+  nextNumber = Math.max(nextNumber, to + 1);
+
+  log.good('device renumbered', {
+    from,
+    to,
+    host: moving.hostname,
+    ...(displaced ? { swapped_with: displaced.hostname } : {}),
+  });
+  emitChange('renumber', to);
+
+  return {
+    ok: true,
+    from,
+    to,
+    swappedWith: displaced ? { number: from, hostname: displaced.hostname } : null,
+  };
+}
+
 /** Remove a device entirely. Used when the operator dismisses one from the controller. */
 function forget(number) {
   const device = get(number);
@@ -434,6 +500,7 @@ module.exports = {
   ids,
   resolve,
   onlineDevices,
+  renumber,
   claimWall,
   wallDevice,
   isWall,

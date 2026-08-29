@@ -49,6 +49,7 @@ function parseArgs(argv) {
     apps: path.join(__dirname, 'config', 'apps.json'),
     layout: path.join(__dirname, 'config', 'layout.json'),
     personality: path.join(__dirname, 'config', 'personality.md'),
+    phrases: path.join(__dirname, 'config', 'phrases.json'),
   };
 
   for (let i = 2; i < argv.length; i += 2) {
@@ -72,6 +73,9 @@ function parseArgs(argv) {
         break;
       case '--personality':
         options.personality = path.resolve(value);
+        break;
+      case '--phrases':
+        options.phrases = path.resolve(value);
         break;
       case '--help':
       case '-h':
@@ -368,7 +372,25 @@ router.post('/api/mute', async (req, res, context) => {
   json(res, 200, result);
 });
 
-/** Designate which device shows the Command Wall. */
+/**
+ * Give a device a different number.
+ *
+ * Swaps with whatever holds the destination number, so the room always has a clean 1..n
+ * with no gaps and no machine renumbered that the operator did not touch.
+ */
+router.post('/api/renumber', async (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+  const body = await readBody(req);
+  if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
+
+  const from = registry.resolve(body.device);
+  if (!from.ok || from.all) return json(res, 400, { ok: false, error: 'device_unknown' });
+
+  const result = registry.renumber(from.number, Number(body.to));
+  json(res, result.ok ? 200 : 400, result.ok ? { ok: true, ...result } : { ok: false, error: result.reason });
+});
+
+/** Designate which device shows the Command Wall — the one the operator calls "main". */
 router.post('/api/wall', async (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
   const body = await readBody(req);
@@ -510,6 +532,30 @@ router.post('/api/speak', async (req, res, context) => {
     200,
     commands.dispatch(body.target, 'speak', { text: body.text, voice: body.voice }, { source: 'api' })
   );
+});
+
+/**
+ * The lines JARVIS is expected to say.
+ *
+ * Served so the controller's buttons and scripts/warm-voice.sh read one list. Warming the
+ * cache from a different list than the buttons use would leave exactly the lines the demo
+ * needs uncached, which is the failure this prevents.
+ */
+router.get('/api/phrases', (req, res, context) => {
+  if (!requireAdmin(req, res, context)) return;
+
+  let list = { phrases: [], counts: [] };
+  try {
+    const raw = JSON.parse(fsp.readFileSync(options.phrases, 'utf8'));
+    list = { phrases: raw.phrases || [], counts: raw.counts || [] };
+  } catch (err) {
+    log.warn('could not read phrases.json', { error: err.message });
+  }
+
+  // Tell the caller which are already cached, so the controller can show what will be
+  // instant and the warmer knows what is left to do.
+  const cached = [...list.phrases, ...list.counts].filter((line) => voice.isCached(line));
+  json(res, 200, { ok: true, ...list, cached: cached.length });
 });
 
 /** What JARVIS's voice is doing, and the personality it is running. */
