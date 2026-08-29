@@ -43,9 +43,19 @@ bold ""
 bold "Preflight"
 
 if command -v node >/dev/null 2>&1; then
-  ok "node $(node -v)"
+  NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+  if [ "$NODE_MAJOR" -ge 18 ]; then
+    ok "node $(node -v)"
+  else
+    # Core uses global fetch and AbortSignal.timeout, both Node 18. An older Node does not
+    # fail at startup — it fails the first time JARVIS tries to speak, which is worse.
+    fail "node $(node -v) is too old; Core needs 18 or newer"
+    warn "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"
+    problems=$((problems + 1))
+  fi
 else
   fail "node is not installed — install it now, while this machine still has internet"
+  warn "  sudo apt install -y nodejs   (check it is 18+, or use nodesource)"
   problems=$((problems + 1))
 fi
 
@@ -141,6 +151,42 @@ else
   esac
 fi
 
+# ---------------------------------------------------------------------------------------
+# Voice
+#
+# JARVIS speaks from this machine (DEVIATIONS.md D11), so this machine needs something to
+# synthesise with and something to play the result. Neither is fatal — the room works
+# silently — but a silent JARVIS is a much flatter demo, and both are one apt line away.
+# ---------------------------------------------------------------------------------------
+
+VOICE_MISSING=""
+
+if command -v paplay >/dev/null 2>&1 || command -v aplay >/dev/null 2>&1 \
+   || command -v mpv >/dev/null 2>&1 || command -v ffplay >/dev/null 2>&1; then
+  ok "audio playback available"
+else
+  warn "nothing here can play audio — JARVIS will be silent"
+  VOICE_MISSING="pulseaudio-utils alsa-utils"
+fi
+
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  ok "GEMINI_API_KEY is set — natural voice available"
+elif [ -f "$REPO_ROOT/.env" ] && grep -q '^GEMINI_API_KEY=.\+' "$REPO_ROOT/.env" 2>/dev/null; then
+  ok "GEMINI_API_KEY is set in .env — natural voice available"
+elif command -v piper >/dev/null 2>&1; then
+  ok "piper installed — natural voice available offline"
+elif command -v spd-say >/dev/null 2>&1 || command -v espeak-ng >/dev/null 2>&1 || command -v say >/dev/null 2>&1; then
+  warn "only the fallback voice is available, and it sounds like it"
+  warn "  put a key in .env (free: aistudio.google.com/apikey), or install piper"
+else
+  warn "no speech synthesiser at all"
+  VOICE_MISSING="$VOICE_MISSING speech-dispatcher espeak-ng"
+fi
+
+if [ -n "$VOICE_MISSING" ]; then
+  warn "  sudo apt install -y$(printf ' %s' $VOICE_MISSING)"
+fi
+
 # WPA2 requires 8 characters. Checked here rather than at nmcli, whose failure for a short
 # passphrase is not obviously about the passphrase.
 if [ "${#PASSPHRASE}" -lt 8 ]; then
@@ -168,6 +214,15 @@ fi
 
 bold ""
 bold "Secrets"
+
+# This script needs sudo for nmcli, but Core does not run as root. Anything created along
+# the way is handed back to the invoking user — otherwise core.json ends up root-owned at
+# mode 600 and Core, started normally, cannot read its own configuration.
+hand_back() {
+  [ -n "${SUDO_USER:-}" ] || return 0
+  [ -e "$1" ] || return 0
+  chown "$SUDO_USER":"$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")" "$1" 2>/dev/null
+}
 
 generate() {
   if command -v openssl >/dev/null 2>&1; then
@@ -198,7 +253,17 @@ else
 JSON
 
   chmod 600 "$CONFIG"
+  hand_back "$CONFIG"
   ok "wrote $(basename "$CONFIG") (mode 600)"
+fi
+
+# .env is gitignored, so it never arrives with a clone. Create it from the example rather
+# than leaving the operator to discover that the file the README talks about is absent.
+if [ ! -f "$REPO_ROOT/.env" ] && [ -f "$REPO_ROOT/.env.example" ]; then
+  cp "$REPO_ROOT/.env.example" "$REPO_ROOT/.env"
+  chmod 600 "$REPO_ROOT/.env"
+  hand_back "$REPO_ROOT/.env"
+  ok "created .env — put your GEMINI_API_KEY in it for a natural voice"
 fi
 
 if [ "$MODE" = "secrets" ]; then
