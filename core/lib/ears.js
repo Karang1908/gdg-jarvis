@@ -28,8 +28,14 @@ const { spawn, spawnSync } = require('child_process');
 
 const log = require('./log');
 
-/** Longest single utterance. Anything past this is a presenter talking to the room. */
-const MAX_UTTERANCE_S = 12;
+/**
+ * Longest single utterance.
+ *
+ * Also the worst case when the silence gate misjudges the room: everything past the end of
+ * the sentence is dead time the presenter waits through, and then more time transcribing
+ * it. Eight seconds is longer than any command in the run of show.
+ */
+const MAX_UTTERANCE_S = 8;
 
 /**
  * Silence that ends an utterance.
@@ -118,7 +124,7 @@ const CAPTURE = [
      */
     args: (file) => [
       '-q', '-c', '1', '-r', '16000', '-b', '16', file,
-      'silence', '1', '0.1', '3%', '1', String(SILENCE_S), '3%',
+      'silence', '1', '0.1', threshold(), '1', String(SILENCE_S), threshold(),
       'trim', '0', String(MAX_UTTERANCE_S),
     ],
   },
@@ -437,6 +443,70 @@ function whisperCppBinary() {
   return whisperCppResolved;
 }
 
+/* ------------------------------------------------------------------------------------
+ * How loud counts as speech
+ * --------------------------------------------------------------------------------- */
+
+/** Never trust a room to be quieter than this, or louder than this. */
+const MIN_THRESHOLD = 3;
+const MAX_THRESHOLD = 35;
+
+let measuredThreshold = null;
+
+/**
+ * The level above which sox decides someone is talking.
+ *
+ * A fixed percentage cannot work. It has to sit above the room's noise floor — or the gate
+ * never closes, every utterance runs to the full length cap, and the presenter waits out
+ * the cap and then waits again while all that silence is transcribed. Measured in the demo
+ * room: a floor at 6.7% RMS against a 3% threshold, which is why a two-second command took
+ * more than ten seconds to come back.
+ *
+ * So it is measured rather than assumed, once, when listening starts. Three times the floor
+ * is comfortably above the room and comfortably below speech, which on the same microphone
+ * ran four times louder again.
+ */
+function threshold() {
+  if (measuredThreshold !== null) return `${measuredThreshold}%`;
+  const configured = Number(config.threshold || process.env.JARVIS_MIC_THRESHOLD);
+  return Number.isFinite(configured) && configured > 0 ? `${configured}%` : `${MIN_THRESHOLD}%`;
+}
+
+/**
+ * Listen to the empty room for a moment and work out what counts as quiet.
+ *
+ * Skipped entirely when a threshold is configured by hand, because someone who has tuned it
+ * for their room should not have it overridden by a second of measurement.
+ */
+async function calibrate() {
+  if (Number(config.threshold || process.env.JARVIS_MIC_THRESHOLD) > 0) return;
+  if (!have('arecord')) return;
+
+  const sample = path.join(workDir, `calibrate-${Date.now()}.wav`);
+
+  const captured = await runCommand(
+    'arecord', ['-q', '-f', 'S16_LE', '-c', '1', '-r', '16000', '-d', '2', sample], 8000
+  );
+  if (captured.status !== 0) return;
+
+  // sox reads the level; discarding the first second avoids the device waking up mid-sample.
+  const measured = await runCommand(
+    'sox', [sample, '-n', 'trim', '1', 'stat'], 8000
+  );
+  fs.unlink(sample, () => {});
+
+  const rms = /RMS\s+amplitude:\s+([0-9.]+)/.exec(String(measured.stderr || ''));
+  if (!rms) return;
+
+  const floor = Number(rms[1]) * 100;
+  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 3)));
+
+  log.good('room measured', {
+    noise_floor: `${floor.toFixed(1)}%`,
+    speech_starts_above: `${measuredThreshold}%`,
+  });
+}
+
 /**
  * How many threads whisper.cpp may use.
  *
@@ -692,7 +762,12 @@ function start(handler) {
   listening = true;
   log.good('microphone open', { record: capture.name, transcribe: transcriber.name });
 
-  loop().catch((err) => {
+  // Measured once per session, before the first utterance, so the gate is set for the room
+  // that is actually there rather than the one the default guessed at.
+  calibrate()
+    .catch(() => {})
+    .then(() => loop())
+    .catch((err) => {
     log.error('listening stopped unexpectedly', { error: err.message });
     listening = false;
   });
