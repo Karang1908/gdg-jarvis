@@ -31,8 +31,17 @@ const voice = require('../lib/voice');
 
 const CACHE = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-voice-test-'));
 
-/** Slower than the budget it is given, the way a bad uplink is. */
-const SLOW_MS = 1200;
+/**
+ * Slower than the budget it is given, the way a bad uplink is.
+ *
+ * Generous on purpose. The assertion below is that the budget fired rather than that it
+ * fired to the millisecond, and a machine busy with other work can be late delivering a
+ * timer by hundreds of milliseconds. With too little room between the budget and this, the
+ * suite fails on a loaded laptop and accuses code that is behaving correctly — which is
+ * exactly what it did on the demo machine.
+ */
+const SLOW_MS = 3000;
+const BUDGET_MS = 400;
 
 voice.PROVIDERS.testcloud = {
   kind: 'synth',
@@ -71,18 +80,20 @@ async function main() {
   console.log('\nWhen the good voice is too slow');
 
   const unwarmed = 'A line nobody thought to warm.';
-  voice.init({ cacheDir: CACHE, budgetMs: 400 });
+  voice.init({ cacheDir: CACHE, budgetMs: BUDGET_MS });
 
   let started = Date.now();
   await voice.speak(unwarmed);
   let waited = Date.now() - started;
 
+  // Half the synthesis time: unmistakably "gave up early" rather than "waited for it",
+  // with room for a loaded machine to deliver the timer late.
   check('the room is not held past the budget',
-    waited < SLOW_MS, `waited ${waited}ms against a 400ms budget`);
+    waited < SLOW_MS / 2, `waited ${waited}ms against a ${BUDGET_MS}ms budget`);
 
   // The point of the whole arrangement. Giving up on the slow call would mean paying the
   // fallback every single time the line is spoken.
-  await new Promise((r) => setTimeout(r, SLOW_MS + 600));
+  await new Promise((r) => setTimeout(r, SLOW_MS + 800));
   check('the good voice finishes in the background and is cached',
     voice.isCached(unwarmed), 'nothing cached — every repeat would sound bad too');
 
