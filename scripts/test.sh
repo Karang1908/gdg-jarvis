@@ -5,7 +5,7 @@
 #   npm test
 #   scripts/test.sh
 #
-# Eight suites. The first four always run; the MCP one needs a Python venv with the SDK and
+# Nine suites. The first four always run; the MCP one needs a Python venv with the SDK and
 # is skipped with a note rather than a failure if there is not one, because it depends on
 # something outside this repository.
 
@@ -14,32 +14,35 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 FAILED=0
 
-printf '\n\033[1m1/8  wire encoding\033[0m\n'
+printf '\n\033[1m1/9  wire encoding\033[0m\n'
 node core/test/wire.test.js || FAILED=1
 
 # Before the API suite, because these are pure and fast: if what a sentence means is wrong,
 # nothing downstream is worth reading.
-printf '\n\033[1m2/8  spoken intents\033[0m\n'
+printf '\n\033[1m2/9  spoken intents\033[0m\n'
 node core/test/intents.test.js || FAILED=1
 
-printf '\n\033[1m3/8  the controller\033[0m\n'
+printf '\n\033[1m3/9  the controller\033[0m\n'
 node core/test/control.test.js || FAILED=1
 
-printf '\n\033[1m4/8  transcription requests\033[0m\n'
+printf '\n\033[1m4/9  transcription requests\033[0m\n'
 node core/test/ears.test.js || FAILED=1
 
 # Both are about latency more than correctness: a line that drifted out of the warmed list
 # is a live synthesis every time it is spoken.
-printf '\n\033[1m5/8  warmed phrases\033[0m\n'
+printf '\n\033[1m5/9  warmed phrases\033[0m\n'
 node core/test/phrases.test.js || FAILED=1
 
-printf '\n\033[1m7/8  the voice budget\033[0m\n'
+printf '\n\033[1m6/9  the voice budget\033[0m\n'
 node core/test/voice.test.js || FAILED=1
 
-printf '\n\033[1m6/8  API, end to end\033[0m\n'
+printf '\n\033[1m7/9  the agy runner\033[0m\n'
+node core/test/ask.test.js || FAILED=1
+
+printf '\n\033[1m8/9  API, end to end\033[0m\n'
 node core/test/api.test.js || FAILED=1
 
-printf '\n\033[1m8/8  MCP tools\033[0m\n'
+printf '\n\033[1m9/9  MCP tools\033[0m\n'
 PYTHON=""
 for candidate in .venv/bin/python venv/bin/python; do
   [ -x "$candidate" ] && "$candidate" -c 'import mcp' >/dev/null 2>&1 && PYTHON="$candidate" && break
