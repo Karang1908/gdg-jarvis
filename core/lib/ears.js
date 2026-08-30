@@ -646,6 +646,10 @@ function describe() {
     transcribe: transcriber ? transcriber.name : null,
     // True when capture cannot detect a pause, so the operator knows why it feels clumsy.
     fixedWindow: Boolean(capture && capture.fixedWindow),
+    // What the room measured, so a gate set too high or too low can be seen rather than
+    // inferred from the fact that nothing is happening.
+    threshold: threshold(),
+    calibrated: measuredThreshold !== null,
   };
 }
 
