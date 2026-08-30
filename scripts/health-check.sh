@@ -222,6 +222,39 @@ else
   bad "release(ALL) did not respond correctly: ${release:-no response}"
 fi
 
+# ---------------------------------------------------------------------------------------
+# What the model is carrying
+#
+# Every registered MCP server contributes its tool definitions to every single turn, and
+# its startup to agy's. Measured on a machine with three registered: 20,554 input tokens to
+# answer "count from one to five". Servers belonging to other projects are pure cost here.
+#
+# Reported rather than changed: `agy mcp disable` is global, so turning one off here would
+# break it everywhere else on this machine. That is the operator's call, not this script's.
+# ---------------------------------------------------------------------------------------
+
+bold ""
+bold "What agy loads"
+
+if command -v agy >/dev/null 2>&1; then
+  servers=$(agy mcp list 2>/dev/null | awk 'NR>1 && NF {print $1}')
+  if [ -z "$servers" ]; then
+    warn "agy has no MCP servers registered — the model cannot control the room"
+    warn "  scripts/install-mcp.sh"
+  else
+    for name in $servers; do
+      if [ "$name" = "jarvis-room" ]; then
+        ok "jarvis-room registered"
+      else
+        warn "$name is registered and costs tokens on every question"
+        warn "  agy mcp disable $name     (global; re-enable with 'agy mcp enable $name')"
+      fi
+    done
+  fi
+else
+  warn "no agy on this machine — free-form questions will not work"
+fi
+
 printf '\n'
 if [ "$problems" -eq 0 ]; then
   printf '  \033[32m\033[1mroom ready\033[0m\n\n'
