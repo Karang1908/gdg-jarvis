@@ -492,10 +492,16 @@
         });
     });
 
-    // The mic may already be open — Core keeps listening across a phone reconnecting, and
-    // the button has to show that rather than claim the room is deaf.
-    // No body at all — api() sends GET only when body is undefined, and a POST of {} here
-    // would read as "on: false" and switch the microphone off every time a phone reconnects.
+    refreshMic();
+  }
+
+  /**
+   * Ask Core what the microphone is doing.
+   *
+   * No body at all — api() sends GET only when body is undefined, and a POST of {} here
+   * would read as "on: false" and switch the microphone off every time a phone reconnects.
+   */
+  function refreshMic() {
     JarvisSession.api('/api/mic')
       .then(function (result) {
         applyMic((result && result.data) || {});
@@ -619,7 +625,14 @@
 
     JarvisStream.connect({
       resolveUrl: JarvisSession.eventStreamUrl,
-      onStatus: linkState,
+      onStatus: function (state) {
+        linkState(state);
+        // Re-read the microphone whenever the link comes back. Core starts with it closed,
+        // so a Core that restarted while this page was open leaves the button showing
+        // LISTENING over a microphone that is shut — and the presenter then talks to a
+        // room that is not listening, with nothing anywhere saying so.
+        if (state === 'open') refreshMic();
+      },
       on: { state: applySnapshot, heard: showHeard },
     });
 
