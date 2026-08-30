@@ -34,6 +34,9 @@ const ears = require('../lib/ears');
 const gemini = ears.TRANSCRIBE.find((t) => t.name === 'gemini');
 const sample = path.join(os.tmpdir(), `jarvis-ears-test-${process.pid}.wav`);
 
+/** The real one, so the sections that need a live socket can put it back. */
+const realFetch = global.fetch;
+
 let failures = 0;
 let sent = null;
 
@@ -121,6 +124,7 @@ async function main() {
 
   fs.unlinkSync(sample);
 
+  await residentServer();
   await responsiveness();
 
   if (failures === 0) {
@@ -199,6 +203,76 @@ async function responsiveness() {
 
   check('the microphone keeps listening while a transcript is acted on',
     heard.length >= 3, `heard ${heard.length} utterances in 4s; a blocking handler yields 2 or fewer`);
+}
+
+/**
+ * The resident transcriber.
+ *
+ * The command-line whisper re-reads its model for every utterance, which is a fixed cost on
+ * everything anyone says and the reason a larger, more accurate model is unaffordable. A
+ * server keeps it loaded. What matters here is that the request matches what whisper.cpp
+ * documents — the field is `file`, not `audio` — and that the reply is read whichever shape
+ * it arrives in, since its README documents the request but not the response.
+ */
+async function residentServer() {
+  console.log('\nThe resident transcriber');
+
+  // The Gemini section above replaces fetch with a stub; this one talks to a real socket.
+  global.fetch = realFetch;
+
+  const http = require('http');
+  const provider = ears.TRANSCRIBE.find((t) => t.name === 'whisper.cpp-server');
+
+  let seen = {};
+  let reply = { type: 'json', body: JSON.stringify({ text: '  take the room  ' }) };
+
+  const server = http.createServer((req, res) => {
+    let body = Buffer.alloc(0);
+    req.on('data', (c) => { body = Buffer.concat([body, c]); });
+    req.on('end', () => {
+      const raw = body.toString('latin1');
+      seen = {
+        path: req.url,
+        method: req.method,
+        fileField: /name="file"/.test(raw),
+        format: (raw.match(/name="response_format"[\s\S]*?\r\n\r\n(\w+)/) || [])[1] || '',
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(reply.body);
+    });
+  });
+
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  process.env.JARVIS_WHISPER_SERVER = `http://127.0.0.1:${server.address().port}`;
+
+  const clip = path.join(os.tmpdir(), `jarvis-server-test-${process.pid}.wav`);
+  fs.writeFileSync(clip, Buffer.alloc(512));
+
+  const heard = await provider.run(clip);
+
+  check('posts to the documented endpoint',
+    seen.path === '/inference' && seen.method === 'POST', JSON.stringify(seen));
+  check('sends the audio as the "file" field whisper.cpp expects',
+    seen.fileField === true, JSON.stringify(seen));
+  check('asks for json', seen.format === 'json', seen.format);
+  check('reads the transcript out of the reply', heard.trim() === 'take the room',
+    JSON.stringify(heard));
+
+  // Its README does not document the response, so a plain-text reply must work too rather
+  // than throwing on JSON.parse.
+  reply = { type: 'text', body: 'take the room' };
+  const plain = await provider.run(clip);
+  check('a plain-text reply is accepted just as well', plain.trim() === 'take the room',
+    JSON.stringify(plain));
+
+  // Chosen ahead of the command line, or none of the above is worth anything.
+  const chosen = ears.init({});
+  check('it is preferred over the command line', chosen.transcribe === 'whisper.cpp-server',
+    String(chosen.transcribe));
+
+  delete process.env.JARVIS_WHISPER_SERVER;
+  fs.unlinkSync(clip);
+  await new Promise((r) => server.close(r));
 }
 
 main();
