@@ -84,6 +84,12 @@ matches('jarvis take too', 'takeover_device', { target: '2' });
 matches('jarvis identify won', 'identify', { target: '1' });
 matches('jarvis take tree', 'takeover_device', { target: '3' });
 
+// Measured, not imagined: these are what came back when a line was played through the
+// room's own speakers into its own microphone.
+matches('show me their architecture', 'scene', { scene: 'network' });
+matches('show me there architecture', 'scene', { scene: 'network' });
+matches('jarvis identified device 2', 'identify', { target: '2' });
+
 console.log('\nOrdinary speech, which must never fire a command');
 // The scene list is checked before identify precisely so this one does not become
 // "identify the device called 'the'".
@@ -93,6 +99,12 @@ fallsThrough('let me show you what happens next');
 fallsThrough('and this is where it gets interesting');
 fallsThrough('we should move on to the next section');
 fallsThrough('thanks everyone for coming today');
+// The loosened article must not turn ordinary sentences into scene changes. The scene name
+// still has to be there and exact, which is what holds these back.
+fallsThrough('show me there in a minute');
+fallsThrough('let me show you their setup');
+fallsThrough('we identified a problem earlier');
+fallsThrough('display that slide again');
 fallsThrough('');
 fallsThrough('   ');
 
