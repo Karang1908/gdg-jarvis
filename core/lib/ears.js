@@ -122,9 +122,22 @@ const CAPTURE = [
      * seconds below it. That is the whole reason sox is preferred — it is the only one of
      * these that ends an utterance when the speaker does.
      */
+    /**
+     * Two thresholds, not one.
+     *
+     * sox takes them separately and they want different values. The first decides that
+     * someone has started talking; it has to be low, because a sentence begins quietly and
+     * a threshold set for the middle of it eats the first word — measured, an 18% gate on
+     * both turned "Jarvis, show me the architecture" into "only the architecture", losing
+     * the wake word and with it the whole command.
+     *
+     * The second decides they have stopped. It can sit higher, because the level has
+     * dropped back toward the room by then, and a higher one stops promptly rather than
+     * waiting for a perfect hush that a real room never gives.
+     */
     args: (file) => [
       '-q', '-c', '1', '-r', '16000', '-b', '16', file,
-      'silence', '1', '0.1', threshold(), '1', String(SILENCE_S), threshold(),
+      'silence', '1', '0.1', startThreshold(), '1', String(SILENCE_S), stopThreshold(),
       'trim', '0', String(MAX_UTTERANCE_S),
     ],
   },
@@ -449,9 +462,10 @@ function whisperCppBinary() {
 
 /** Never trust a room to be quieter than this, or louder than this. */
 const MIN_THRESHOLD = 3;
-const MAX_THRESHOLD = 35;
+const MAX_THRESHOLD = 25;
 
-let measuredThreshold = null;
+let measuredFloorPercent = MIN_THRESHOLD;
+let calibrated = false;
 
 /**
  * The level above which sox decides someone is talking.
@@ -473,10 +487,27 @@ let measuredThreshold = null;
  *
  * A floor of 6.7% doubled lands at 13%, in the middle of the band that works.
  */
-function threshold() {
-  if (measuredThreshold !== null) return `${measuredThreshold}%`;
+function measuredFloor() {
   const configured = Number(config.threshold || process.env.JARVIS_MIC_THRESHOLD);
-  return Number.isFinite(configured) && configured > 0 ? `${configured}%` : `${MIN_THRESHOLD}%`;
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return measuredFloorPercent;
+}
+
+/** Low: a sentence starts quietly, and missing its first word loses the whole command. */
+function startThreshold() {
+  const at = measuredFloor() * 1.3;
+  return `${Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, at)))}%`;
+}
+
+/** Higher: by the time they stop, the level is back near the room. */
+function stopThreshold() {
+  const at = measuredFloor() * 2;
+  return `${Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, at)))}%`;
+}
+
+/** What the two are built from, so both move together when the room does. */
+function threshold() {
+  return `${startThreshold()} / ${stopThreshold()}`;
 }
 
 /**
@@ -525,11 +556,13 @@ async function calibrate() {
   // was written for: below 10% the floor holds the gate open and nothing is trimmed, above
   // 20% it starts cutting the front off sentences, and 12-15% keeps the speech and drops
   // the silence. A 5.4% floor times 2.5 lands at 13%.
-  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 2.5)));
+  measuredFloorPercent = floor;
+  calibrated = true;
 
   log.good('room measured', {
     noise_floor: `${floor.toFixed(1)}%`,
-    speech_starts_above: `${measuredThreshold}%`,
+    starts_above: startThreshold(),
+    stops_below: stopThreshold(),
     samples: levels.map((l) => l.toFixed(1)).join(' '),
   });
 }
@@ -649,7 +682,7 @@ function describe() {
     // What the room measured, so a gate set too high or too low can be seen rather than
     // inferred from the fact that nothing is happening.
     threshold: threshold(),
-    calibrated: measuredThreshold !== null,
+    calibrated,
   };
 }
 
