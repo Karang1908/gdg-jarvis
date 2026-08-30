@@ -512,6 +512,8 @@ function acknowledge(nodeId, commandId, status, message) {
  *
  * Logged exactly like a dispatched command so the wall shows it alongside everything else.
  */
+let speechRequests = 0;
+
 function speakAsJarvis(text, context = {}) {
   const speech = validate.checkSpeech(text);
   if (!speech.ok) {
@@ -530,9 +532,24 @@ function speakAsJarvis(text, context = {}) {
   }
 
   log.good('JARVIS', { says: speech.value, source: context.source || 'unknown' });
+  speechRequests += 1;
   voice.speak(speech.value);
 
   return { ok: true, spoken: speech.value, backend: state.backend };
+}
+
+/**
+ * How many times JARVIS has been asked to say something.
+ *
+ * Exists so a caller can tell whether the model spoke for itself through the MCP speak tool
+ * — if it did, repeating its answer would say everything twice. This used to be inferred
+ * from the voice cache's usage counters, which was approximate in both directions: a cached
+ * line and a synthesised one count differently, and neither moves until the asynchronous
+ * work begins. This increments synchronously, right here, so a caller reading it either
+ * side of an await gets an exact answer.
+ */
+function speechCount() {
+  return speechRequests;
 }
 
 /**
@@ -566,6 +583,7 @@ function recent(limit = 25) {
 module.exports = {
   dispatch,
   speakAsJarvis,
+  speechCount,
   setMuted,
   takeover,
   release,
