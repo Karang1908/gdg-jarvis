@@ -144,7 +144,9 @@ try {
   // projector and paying it in front of an audience is the whole point. Not awaited —
   // Core serves everything else meanwhile, and a spoken command never needs agy at all.
   ask.warm().catch(() => {});
-  ears.init(config.ears || {});
+  // The microphone is in the same room as the speakers, so ears has to be able to tell
+  // JARVIS's own voice from somebody talking to it.
+  ears.init({ ...(config.ears || {}), isSpeaking: voice.isSpeaking });
 
   choreography.init(require(options.layout));
   registry.reset();

@@ -99,6 +99,14 @@ matches('always take the room', 'takeover_all', { target: 'ALL' });
 matches('always show me the architecture', 'scene', { scene: 'network' });
 matches('always identify two', 'identify', { target: '2' });
 
+// Exactly as they came off the microphone, once the recogniser was primed. Note the full
+// stop after the name: a pattern that allowed only a comma there sent a perfectly good
+// command to the model instead of firing it.
+matches('JARVIS. Take the room.', 'takeover_all', { target: 'ALL' });
+matches('JARVIS. Take over the room.', 'takeover_all', { target: 'ALL' });
+matches('JARVIS release all.', 'release_all', { target: 'ALL' });
+matches('JARVIS. Show me the architecture.', 'scene', { scene: 'network' });
+
 console.log('\nOrdinary speech, which must never fire a command');
 // The scene list is checked before identify precisely so this one does not become
 // "identify the device called 'the'".

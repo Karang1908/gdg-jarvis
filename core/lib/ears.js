@@ -52,6 +52,8 @@ const SILENCE_S = 0.8;
 
 let config = {};
 let capture = null;
+/** Asked before acting on a transcript: was JARVIS talking while this was recorded? */
+let isSelf = () => false;
 let transcriber = null;
 let listening = false;
 let current = null;
@@ -636,6 +638,7 @@ function findText(payload) {
 
 function init(options = {}) {
   config = options || {};
+  if (typeof options.isSpeaking === 'function') isSelf = options.isSpeaking;
 
   workDir = path.join(os.tmpdir(), 'jarvis-ears');
   try {
@@ -785,6 +788,10 @@ async function loop() {
       continue;
     }
 
+    // Noted before transcription, which takes long enough that JARVIS may have started
+    // and finished speaking in the meantime.
+    const spokeWhileRecording = isSelf();
+
     let text = '';
     try {
       text = tidy(await transcriber.run(recorded.file));
@@ -800,6 +807,20 @@ async function loop() {
     // and a command that fires after the presenter has already closed the microphone is
     // exactly the kind of thing the button exists to prevent.
     if (!listening) break;
+
+    // Do not act on JARVIS's own voice.
+    //
+    // The microphone is in the same room as the speakers, so it hears every line JARVIS
+    // says and transcribes it back: "One moment, sir." returned as "One moment to serve.",
+    // "Releasing the room." came back word for word. Each one costs a transcription, and a
+    // line that happened to look like a command would have the room acting on itself.
+    //
+    // Checked here rather than before recording, because the answer that matters is whether
+    // JARVIS was talking while this was being captured.
+    if (spokeWhileRecording) {
+      log.info('ignored its own voice', { text: text.slice(0, 60) });
+      continue;
+    }
 
     if (text && text.length > 2 && onTranscript) {
       log.info('HEARD', { text: text.slice(0, 120) });

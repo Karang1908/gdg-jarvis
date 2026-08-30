@@ -14,7 +14,7 @@
  */
 
 /** Optional address, so every command works with or without the name. */
-const WAKE = '^(?:hey\\s+|ok\\s+)?(?:(?:jarvis|jarvas|jervis|javis|always)[,\\s]*)?';
+const WAKE = '^(?:hey\\s+|ok(?:ay)?\\s+)?(?:(?:jarvis|jarvas|jervis|javis|always)[,.!\\s]*)?';
 
 /**
  * Spoken numbers, including the homophones a recogniser actually returns.
@@ -62,7 +62,9 @@ function spokenToNumber(word) {
 const INTENTS = [
   {
     name: 'takeover_all',
-    test: new RegExp(WAKE + '(?:take|seize|grab)\\s+(?:the\\s+)?(?:room|everything|all)'),
+    // "take over the room" is at least as natural as "take the room", and was said out
+    // loud into the microphone before anyone noticed the pattern did not allow it.
+    test: new RegExp(WAKE + '(?:take|seize|grab)(?:\\s+over)?\\s+(?:the\\s+)?(?:room|everything|all)'),
     say: 'Taking the room.',
     plan: () => ({ route: '/api/takeover', body: { target: 'ALL' }, label: 'TAKE THE ROOM' }),
   },
@@ -135,6 +137,9 @@ const INTENTS = [
  * device reference is resolved to a number here so "take too" reaches the right screen.
  */
 function match(transcript, resolveDevice) {
+  // A recogniser punctuates. "Jarvis, take the room" comes back as "JARVIS. Take the room."
+  // — with a full stop after the name — and a pattern that allowed only a comma there sent
+  // a perfectly good command to the model instead of firing it.
   const text = String(transcript || '').toLowerCase().trim().replace(/[.?!]+$/, '');
   if (!text) return null;
 

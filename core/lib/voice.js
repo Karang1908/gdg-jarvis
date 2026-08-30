@@ -618,6 +618,21 @@ function describe() {
  * stderr is captured for the same reason: the player already knows exactly what is wrong
  * and says so, and discarding that was throwing away the answer.
  */
+/**
+ * When JARVIS last stopped talking.
+ *
+ * The microphone is in the same room as the speakers, so it hears everything JARVIS says
+ * and dutifully transcribes it: "One moment, sir." came back as "One moment to serve." and
+ * "Releasing the room." came back verbatim. Each one costs a transcription, and a line that
+ * happened to look like a command would make the room act on its own voice.
+ */
+let speakingUntil = 0;
+
+/** True while JARVIS is talking, and for a moment after the last sound leaves the speaker. */
+function isSpeaking() {
+  return Date.now() < speakingUntil;
+}
+
 function play(file, startedAt) {
   return new Promise((resolve) => {
     const spawnedAt = Date.now();
@@ -625,6 +640,8 @@ function play(file, startedAt) {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     current = child;
+    // Generous while it plays; narrowed to a short tail once it finishes.
+    speakingUntil = Date.now() + 60_000;
 
     // The player has the file open and is about to make a noise. Close enough to
     // "first sound" to be the number worth reporting, and far more useful than the
@@ -638,6 +655,9 @@ function play(file, startedAt) {
 
     const done = (result) => {
       if (current === child) current = null;
+      // A moment past the end: the tail of a word is still in the air, and the recorder is
+      // quicker to notice sound than the room is to go quiet.
+      speakingUntil = Date.now() + 600;
       clearTimeout(guard);
       resolve(result);
     };
@@ -927,6 +947,7 @@ const isEnabled = () => enabled;
 module.exports = {
   init,
   speak,
+  isSpeaking,
   synthesise,
   silence,
   describe,
