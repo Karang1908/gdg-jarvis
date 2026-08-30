@@ -35,25 +35,18 @@ const SPEECH_TIMEOUT_MS = 10_000;
 /**
  * How long a live synthesis may take before the local voice takes over.
  *
- * Four seconds, which is a stated requirement rather than a guess: best available quality,
- * and not one second past four.
+ * Off. Not "off for now" — off because capping it is the wrong trade, and it has been tried
+ * twice.
  *
- * It has been wrong in both directions. One second was the original value and it fired
- * constantly — Gemini routinely takes longer, so the room heard the robotic fallback
- * instead of the voice it was configured for. Disabling it entirely was the correction,
- * and that was wrong the other way: a slow uplink could leave the room silent for fifteen
- * seconds with no way to tell whether anything was coming.
+ * A cap does not shorten a line; it decides whether the line is spoken in the good voice or
+ * the robotic one. And synthesis time scales with sentence length, so any ceiling lands
+ * hardest on the longest sentences — exactly the ones where the voice matters most. A demo
+ * where short lines sound right and long ones sound like 1998 is worse than one that waits.
  *
- * What makes four seconds workable rather than a compromise is the two things around it.
- * A line that blows the budget is still being synthesised in the background and still gets
- * cached, so it is instant and full quality the second time. And every line the demo plans
- * to say is warmed ahead of time, so the budget almost never applies to them at all — it
- * is a guard for novel sentences, not the normal path.
- *
- * Set JARVIS_VOICE_BUDGET_MS to override. Zero disables it and waits, up to the hard
- * timeout that stops a wedged call hanging forever.
+ * Set JARVIS_VOICE_BUDGET_MS if a venue's uplink turns out to be bad enough that waiting is
+ * worse than sounding flat. The hard timeout still stops a wedged call hanging forever.
  */
-const DEFAULT_BUDGET_MS = 4_000;
+const DEFAULT_BUDGET_MS = 0;
 
 /** The hard ceiling on a background call, once the budget has already been given up on. */
 const SYNTH_TIMEOUT_MS = 15_000;
