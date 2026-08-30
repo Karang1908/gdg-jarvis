@@ -133,6 +133,12 @@ try {
 
   // Runs from the repository root so agy picks up .agents/AGENTS.md as its persona.
   ask.init({ cwd: path.join(__dirname, '..') });
+
+  // Start agy now rather than on the first question. It takes about five seconds to be
+  // ready, and the difference between paying that while someone is plugging in the
+  // projector and paying it in front of an audience is the whole point. Not awaited —
+  // Core serves everything else meanwhile, and a spoken command never needs agy at all.
+  ask.warm().catch(() => {});
   ears.init(config.ears || {});
 
   choreography.init(require(options.layout));
@@ -947,6 +953,7 @@ function shutdown(signal) {
   console.log('');
   log.warn(`${signal} — releasing the room before exit`);
   ears.stop();
+  ask.stop();
   voice.silence();
   commands.release('ALL', { source: 'shutdown' });
 
