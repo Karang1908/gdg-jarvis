@@ -501,7 +501,14 @@ function init(options = {}) {
     cacheDir = null;
   }
 
-  player = findPlayer();
+  // JARVIS_AUDIO_PLAYER names one outright. Two uses: an operator whose machine picks the
+  // wrong one, and the test suite, which needs the speaking path exercised without putting
+  // sound through the host's audio stack — whose timing is unpredictable and which fails
+  // outright on a synthetic buffer, making a timing assertion flap for no real reason.
+  const named = config.player || process.env.JARVIS_AUDIO_PLAYER;
+  player = named
+    ? { command: named, args: (file) => [file] }
+    : findPlayer();
 
   // An explicitly named provider wins even if something "better" is installed: an operator
   // who names one has a reason, usually that the default sounds wrong in their room.

@@ -31,6 +31,12 @@ const voice = require('../lib/voice');
 
 const CACHE = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-voice-test-'));
 
+// Exercise the speaking path without actually making a sound. The host's player has
+// unpredictable timing and rejects a synthetic buffer outright — "AudioFileOpen failed" —
+// which made the timing assertion below flap while the code under test was fine. `true`
+// accepts any argument and exits immediately.
+process.env.JARVIS_AUDIO_PLAYER = 'true';
+
 /**
  * Slower than the budget it is given, the way a bad uplink is.
  *
