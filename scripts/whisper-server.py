@@ -31,6 +31,15 @@ from pathlib import Path
 
 MODEL = None
 
+# The words this room is built out of. Whisper takes it as the run-up to what it is about to
+# hear, so the names and commands stop being surprises.
+PROMPT = (
+    "JARVIS. Hey JARVIS. Take the room. Release the room. "
+    "Identify device one. Identify device two. Identify device three. "
+    "Show me the architecture. Show the reactor. Switch to terminal. "
+    "Move to device two. Split yourself. Reactor sequence. How many are online."
+)
+
 
 def parse_multipart(body: bytes, content_type: str) -> bytes:
     """Pull the one file part out of a multipart body.
@@ -103,6 +112,14 @@ class Handler(BaseHTTPRequestHandler):
                 segments, _info = MODEL.transcribe(
                     clip.name,
                     language="en",
+                    # Tell it what it is likely to hear.
+                    #
+                    # A small model has no reason to expect a proper noun it has never seen,
+                    # so it substitutes the nearest common word — measured, "Jarvis" came
+                    # back as "always", every time, which loses the wake word and with it
+                    # the command. Naming the vocabulary up front biases it toward the words
+                    # this room actually uses. It costs nothing at run time.
+                    initial_prompt=PROMPT,
                     # Off: it costs time, and Core discards anything it cannot match anyway.
                     without_timestamps=True,
                     # A room has noise in it. Without this, silence is transcribed as
