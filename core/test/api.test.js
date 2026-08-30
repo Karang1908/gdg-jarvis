@@ -118,6 +118,7 @@ async function startCore() {
 }
 
 function stopCore() {
+  for (const beat of beats) clearInterval(beat);
   for (const controller of streams) {
     try {
       controller.abort();
@@ -146,6 +147,9 @@ function stopCore() {
  * ------------------------------------------------------------------------------------ */
 
 const called = new Set();
+
+/** Heartbeat timers, so they can be stopped when the suite finishes. */
+const beats = [];
 
 async function api(method, route, body, token = ADMIN) {
   called.add(`${method} ${route.split('?')[0]}`);
@@ -193,6 +197,25 @@ async function enrol(hostname, deviceOs, wall = false) {
   fetch(`${BASE}/api/agent/stream?device=${number}&session=${session}`, {
     signal: controller.signal,
   }).catch(() => {});
+
+  // Beat like a real agent does.
+  //
+  // Holding the socket open is not enough: Core drops a device that stops heartbeating,
+  // because a live socket with a wedged client behind it is exactly the case presence has
+  // to catch. Without this the suite passed only on a machine fast enough to finish inside
+  // that window — on a slower one the devices were swept mid-run and three unrelated checks
+  // failed with "offline", which is a confusing way to learn the harness was unfaithful.
+  let seq = 0;
+  const beat = setInterval(() => {
+    seq += 1;
+    fetch(`${BASE}/api/agent/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session, state: 'idle', overlay: '0', awake: '1', seq }),
+    }).catch(() => {});
+  }, 4_000);
+  beat.unref();
+  beats.push(beat);
 
   return { number: Number(number), session, hostname };
 }
