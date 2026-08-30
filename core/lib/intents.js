@@ -124,9 +124,27 @@ const INTENTS = [
     plan: () => ({ route: '/api/cascade', body: { effect: 'arc_reactor' }, label: 'CASCADE' }),
   },
   {
+    /**
+     * Only the bare question.
+     *
+     * "How many are online" is answered from the registry, instantly. "How many Windows
+     * machines are there" is a different question — it needs to look at what each device
+     * is — and answering it with a plain total is worse than being slow: asked how many
+     * Windows devices were connected, it said "one system is online", which was true of the
+     * total and wrong about Windows.
+     *
+     * So anything qualifying the question hands it to the model, which has tools to answer
+     * it properly.
+     */
     name: 'count',
-    test: new RegExp(WAKE + '(?:how many|count|status|are you there|you there)'),
-    plan: () => ({ route: null, label: 'COUNT', answer: 'count' }),
+    test: new RegExp(WAKE + '(?:how many|count|status|are you there|you there)\\s*(.*)$'),
+    plan: (m) => {
+      const rest = String(m[1] || '').trim();
+      // Words that merely restate "how many are online" rather than narrowing it.
+      const generic = /^(?:(?:are|is|there|the|we|you|got|have|has|do|does|now|right now|currently|online|connected|up|alive|active|devices?|systems?|machines?|laptops?|screens?|nodes?|in the room|joined|enrolled|s)\b[\s,]*)*$/;
+      if (rest && !generic.test(rest)) return { route: null, label: 'COUNT', unqualified: false };
+      return { route: null, label: 'COUNT', answer: 'count' };
+    },
   },
 ];
 
@@ -148,6 +166,9 @@ function match(transcript, resolveDevice) {
     if (!found) continue;
 
     const plan = intent.plan(found);
+
+    // A plan that declines to answer is not a match at all — it belongs to the model.
+    if (plan.answer === undefined && plan.route === null) return null;
 
     if (plan.needsDevice) {
       const number = spokenToNumber(plan.needsDevice);

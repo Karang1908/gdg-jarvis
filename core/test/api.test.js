@@ -428,6 +428,20 @@ async function heartbeat(device, extra = {}) {
   check('a fixed command still works without being addressed',
     bare.data.matched === 'takeover_all', JSON.stringify(bare.data).slice(0, 160));
 
+  // A command is fire-and-forget, said on the way back to addressing the audience. If it
+  // opened a conversation window, the next half minute of presenting would go to the model
+  // — the exact thing the wake word exists to prevent.
+  const after = await api('POST', '/api/utterance', { text: 'and this is where it gets interesting' });
+  check('a command does not leave the room listening for conversation',
+    after.data.ignored === true, JSON.stringify(after.data).slice(0, 160));
+
+  // Asking about a subset is not the question the registry can answer. Asked how many
+  // Windows machines were connected, it used to reply with the plain total — true of the
+  // total, wrong about Windows.
+  const qualified = await api('POST', '/api/utterance', { text: 'how many windows devices are there' });
+  check('a qualified count is not answered from the registry',
+    qualified.data.matched !== 'count', JSON.stringify(qualified.data).slice(0, 160));
+
   check('the microphone needs the admin password',
     (await api('POST', '/api/mic', { on: true }, null)).status === 401);
 

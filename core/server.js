@@ -591,6 +591,22 @@ router.post('/api/identify', async (req, res, context) => {
  */
 const ACKNOWLEDGEMENT = 'One moment, sir.';
 
+/**
+ * How long JARVIS keeps listening after it has answered a question.
+ *
+ * The wake word exists so the presenter can talk to a room for half an hour without every
+ * sentence becoming a model call. It is not meant to make conversation absurd — having to
+ * say the name again to ask "and what about the other one?" is not how anyone talks.
+ *
+ * So answering a question leaves the door open for a while. A fixed command does not: that
+ * is fire and forget, said on the way back to addressing the audience.
+ *
+ * Twenty seconds is long enough to think of the follow-up and short enough that going back
+ * to presenting costs at most one stray model call.
+ */
+const FOLLOW_UP_MS = 20_000;
+
+let conversationUntil = 0;
 let thinking = false;
 
 async function handleUtterance(text, source) {
@@ -601,11 +617,22 @@ async function handleUtterance(text, source) {
   // understands numbers, and a spoken hostname is the natural way to refer to a teammate.
   const intent = intents.match(heard, (device) => registry.resolve(device).ok);
 
+  // Addressed by name, or still inside the window opened by the last time it was.
+  const addressed = intents.addressed(heard) || Date.now() < conversationUntil;
+
   // Say what is about to happen with it, so the phone can show the difference between a
   // command, a question being thought about, and speech that was simply not for JARVIS.
   // A live microphone that ignores you must never look like a dead one.
-  const status = intent ? 'command' : intents.addressed(heard) ? 'thinking' : 'ignored';
+  const status = intent ? 'command' : addressed ? 'thinking' : 'ignored';
   observers.broadcast('heard', { text: heard, at: Date.now(), source, status });
+
+  // A fixed command does not open the window.
+  //
+  // "Take the room" is fire and forget — the presenter says it and goes straight back to
+  // talking to the audience, and treating the next half minute of that as conversation
+  // would put every sentence of it through the model. That is the exact thing the wake word
+  // exists to prevent. Only a question opens a conversation, because only a question is one.
+  if (intent) conversationUntil = 0;
 
   if (intent) {
     if (intent.answer === 'count') {
@@ -657,6 +684,9 @@ async function handleUtterance(text, source) {
 
   const answered = await ask.ask(heard).finally(() => {
     thinking = false;
+    // Measured from the end of the answer, not the start of the question — the follow-up
+    // comes after JARVIS has finished speaking, not while it is still thinking.
+    conversationUntil = Date.now() + FOLLOW_UP_MS;
   });
 
   // The model can speak for itself through the MCP speak tool. If it did, repeating the
@@ -845,9 +875,24 @@ router.post('/api/remember', async (req, res, context) => {
 });
 
 /** Re-read personality.md without restarting Core, so it can be tuned during rehearsal. */
-router.post('/api/personality/reload', (req, res, context) => {
+/**
+ * Pick up an edited personality without a restart.
+ *
+ * Re-priming matters as much as re-reading. agy is told who it is once, as the first turn
+ * of the conversation Core keeps open — so a personality reloaded into Core but not into
+ * agy changes nothing the model does, which looks exactly like the edit having no effect.
+ */
+router.post('/api/personality/reload', async (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
-  json(res, 200, { ok: true, ...personality.load(options.personality, options.memory) });
+
+  const loaded = personality.load(options.personality, options.memory);
+  ask.init({ cwd: path.join(__dirname, '..'), instructions: personality.get().body });
+
+  // A fresh conversation, because the old one still has the old personality in its context.
+  ask.stop();
+  const warmed = await ask.warm();
+
+  json(res, 200, { ok: true, ...loaded, model: warmed.ok ? 'reprimed' : (warmed.error || 'not_repriming') });
 });
 
 // --- Enrollment (§7) -----------------------------------------------------------------

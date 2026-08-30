@@ -220,7 +220,22 @@ if [ "$INSTALL_AGENT" -eq 1 ] && [ "$PRINT_ONLY" -eq 0 ]; then
       const p = require("./core/lib/personality.js");
       const path = require("path");
       p.load("core/config/personality.md", "core/config/memory.md");
-      require("fs").writeFileSync(".agents/AGENTS.md", p.get().body + "\n");
+      // Says outright that it is generated. Without this it looks like the file to edit —
+      // it sits in the folder people expect to edit, and time was lost to changes made
+      // here that this script then quietly overwrote.
+      const banner = [
+        "<!--",
+        "  GENERATED FILE — do not edit. scripts/install-mcp.sh overwrites it.",
+        "",
+        "  Who JARVIS is .......  core/config/personality.md",
+        "  What JARVIS knows ...  core/config/memory.md   (URLs, names, room facts)",
+        "",
+        "  Then restart Core, or POST /api/personality/reload to pick it up live.",
+        "-->",
+        "",
+        "",
+      ].join("\n");
+      require("fs").writeFileSync(".agents/AGENTS.md", banner + p.get().body + "\n");
     ' >/dev/null 2>&1 || cp "$SOURCE" "$REPO_ROOT/.agents/AGENTS.md"
     ok "workspace      $REPO_ROOT/.agents/AGENTS.md (tracked in git)"
 
