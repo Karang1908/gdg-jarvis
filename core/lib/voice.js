@@ -116,6 +116,20 @@ function wavFromPcm(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
  * the last resort, and the reason the chain prefers anything else.
  * --------------------------------------------------------------------------------- */
 
+/**
+ * Where piper is.
+ *
+ * Usually not on PATH. `pip install piper-tts` puts it inside whichever virtual environment
+ * it was installed into, and on a Debian-family machine that is the only way to install it
+ * without fighting the system package manager — so an installed, working piper that Core
+ * could not find was the normal case rather than the exception.
+ */
+function piperBinary() {
+  const configured = (config.piper || {}).bin || process.env.JARVIS_PIPER_BIN;
+  if (configured) return fs.existsSync(configured) ? configured : null;
+  return have('piper') ? 'piper' : null;
+}
+
 const PROVIDERS = {
   /**
    * Gemini TTS. The natural one.
@@ -195,7 +209,7 @@ const PROVIDERS = {
   piper: {
     kind: 'synth',
     available() {
-      return have('piper') && Boolean((config.piper || {}).model);
+      return Boolean(piperBinary()) && Boolean((config.piper || {}).model);
     },
     synth(text) {
       const settings = config.piper || {};
@@ -203,7 +217,7 @@ const PROVIDERS = {
 
       return new Promise((resolve, reject) => {
         const child = spawn(
-          'piper',
+          piperBinary(),
           ['--model', settings.model, '--output_file', output],
           { stdio: ['pipe', 'ignore', 'pipe'] }
         );
@@ -457,6 +471,7 @@ function resolve(options) {
   if (env.JARVIS_VOICE) merged.gemini.voice = env.JARVIS_VOICE;
   if (env.JARVIS_GEMINI_MODEL) merged.gemini.model = env.JARVIS_GEMINI_MODEL;
   if (env.JARVIS_PIPER_MODEL) merged.piper.model = env.JARVIS_PIPER_MODEL;
+  if (env.JARVIS_PIPER_BIN) merged.piper.bin = env.JARVIS_PIPER_BIN;
 
   // The default has to be applied here rather than at the point of use, because zero is a
   // meaningful value there — it means "no budget, wait for the good voice" — and cannot
