@@ -450,7 +450,20 @@ function threads() {
   return Math.max(1, Math.min(4, os.cpus().length));
 }
 
-/** Which Python whisper model. tiny.en is the one that keeps up with a live demo. */
+/**
+ * Which whisper model.
+ *
+ * tiny.en, measured on the demo laptop against the same spoken line:
+ *
+ *   tiny.en    530ms    "Jarvis, show me their architecture."
+ *   base.en    860ms    identical
+ *   small.en  2158ms    identical
+ *
+ * Identical text from all three, so the larger models buy nothing here and cost up to four
+ * times the wait. That is what short fixed commands do to a recogniser — there is not much
+ * for a bigger model to be cleverer about. Set JARVIS_WHISPER_SIZE if a room proves harder
+ * than this one.
+ */
 function whisperSize() {
   return config.whisperModel || process.env.JARVIS_WHISPER_SIZE || 'tiny.en';
 }
