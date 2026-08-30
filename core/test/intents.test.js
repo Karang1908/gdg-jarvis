@@ -90,6 +90,15 @@ matches('show me their architecture', 'scene', { scene: 'network' });
 matches('show me there architecture', 'scene', { scene: 'network' });
 matches('jarvis identified device 2', 'identify', { target: '2' });
 
+// "always" is what tiny.en returns for "Jarvis", spoken by a human into that room's
+// microphone — consistently, not occasionally. A small model has no reason to expect a
+// proper noun it has never seen, so it reaches for the nearest common word. The recogniser
+// is primed with the room's vocabulary now, but the matcher stays tolerant of it: losing
+// the wake word loses the whole command.
+matches('always take the room', 'takeover_all', { target: 'ALL' });
+matches('always show me the architecture', 'scene', { scene: 'network' });
+matches('always identify two', 'identify', { target: '2' });
+
 console.log('\nOrdinary speech, which must never fire a command');
 // The scene list is checked before identify precisely so this one does not become
 // "identify the device called 'the'".
@@ -105,6 +114,10 @@ fallsThrough('show me there in a minute');
 fallsThrough('let me show you their setup');
 fallsThrough('we identified a problem earlier');
 fallsThrough('display that slide again');
+// Tolerating "always" must not turn every sentence containing it into a command. What
+// holds these back is that a command verb has to follow it immediately.
+fallsThrough('we should always check the network');
+fallsThrough('always keep an eye on the slides');
 fallsThrough('');
 fallsThrough('   ');
 

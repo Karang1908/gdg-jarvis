@@ -14,7 +14,7 @@
  */
 
 /** Optional address, so every command works with or without the name. */
-const WAKE = '^(?:hey\\s+|ok\\s+)?(?:jarvis[,\\s]*)?';
+const WAKE = '^(?:hey\\s+|ok\\s+)?(?:(?:jarvis|jarvas|jervis|javis|always)[,\\s]*)?';
 
 /**
  * Spoken numbers, including the homophones a recogniser actually returns.
@@ -169,7 +169,7 @@ function match(transcript, resolveDevice) {
  * Not a stylistic list. Whisper and Chrome both mangle proper nouns, and being deaf to
  * "jervis" would look identical to being deaf full stop.
  */
-const NAMES = 'jarvis|jarvas|jervis|javis|jarviss|darvis';
+const NAMES = 'jarvis|jarvas|jervis|javis|jarviss|darvis|always';
 
 /**
  * Is this utterance addressed to JARVIS?
