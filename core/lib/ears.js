@@ -462,9 +462,16 @@ let measuredThreshold = null;
  * room: a floor at 6.7% RMS against a 3% threshold, which is why a two-second command took
  * more than ten seconds to come back.
  *
- * So it is measured rather than assumed, once, when listening starts. Three times the floor
- * is comfortably above the room and comfortably below speech, which on the same microphone
- * ran four times louder again.
+ * So it is measured rather than assumed, once, when listening starts. Twice the floor, which
+ * is not a guess either — running a real recording of speech through the gate at a range of
+ * thresholds, in that room, on that microphone:
+ *
+ *    5-10%   keeps 4.6s of a 5s clip   the floor holds the gate open; barely trims
+ *    12-15%  keeps 2.1-2.9s            the speech, without the silence around it
+ *    20%     keeps 1.6s                starts eating the beginning of sentences
+ *    25%     keeps 0.6s                cuts most of it
+ *
+ * A floor of 6.7% doubled lands at 13%, in the middle of the band that works.
  */
 function threshold() {
   if (measuredThreshold !== null) return `${measuredThreshold}%`;
@@ -499,7 +506,7 @@ async function calibrate() {
   if (!rms) return;
 
   const floor = Number(rms[1]) * 100;
-  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 3)));
+  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 2)));
 
   log.good('room measured', {
     noise_floor: `${floor.toFixed(1)}%`,
