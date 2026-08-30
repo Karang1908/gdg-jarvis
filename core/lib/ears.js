@@ -151,6 +151,41 @@ const CAPTURE = [
 
 const TRANSCRIBE = [
   {
+    /**
+     * whisper.cpp with the model already loaded.
+     *
+     * The CLI below re-reads the model from disk for every utterance. That is a fixed cost
+     * on every single thing anyone says, and it grows with the model — the whole reason a
+     * bigger, more accurate model is unaffordable. A resident server pays it once.
+     *
+     * Core starts it, so there is nothing extra to remember at the venue.
+     */
+    name: 'whisper.cpp-server',
+    available: () => Boolean(serverUrl()),
+    async run(file) {
+      const body = new FormData();
+      body.append('file', new Blob([fs.readFileSync(file)]), 'utterance.wav');
+      body.append('response_format', 'json');
+      body.append('temperature', '0.0');
+
+      const response = await postWithRetry(`${serverUrl()}/inference`, body);
+
+      if (!response.ok) {
+        throw new Error(`whisper-server ${response.status}: ${(await response.text()).slice(0, 160)}`);
+      }
+
+      // The server's README documents the request but not the response shape, so this
+      // accepts either the OpenAI-style {text} or plain text, rather than guessing one.
+      const raw = await response.text();
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed.text || findText(parsed) || '';
+      } catch {
+        return raw;
+      }
+    },
+  },
+  {
     name: 'whisper.cpp',
     available: () => Boolean(whisperCppBinary()) && Boolean(modelPath()),
     async run(file) {
@@ -253,6 +288,101 @@ function modelPath() {
   return config.whisperCppModel || process.env.JARVIS_WHISPER_MODEL || '';
 }
 
+/* ------------------------------------------------------------------------------------
+ * The resident transcriber
+ * --------------------------------------------------------------------------------- */
+
+let serverProcess = null;
+let serverOrigin = '';
+
+/** Where the resident transcriber is, if there is one. */
+function serverUrl() {
+  return process.env.JARVIS_WHISPER_SERVER || serverOrigin || '';
+}
+
+/**
+ * Start whisper-server, if this machine can.
+ *
+ * Needs the binary and a model. With an explicit JARVIS_WHISPER_SERVER the operator is
+ * pointing at one they run themselves, so nothing is started here.
+ */
+function startServer() {
+  if (process.env.JARVIS_WHISPER_SERVER) {
+    log.info('using the whisper server you configured', { url: process.env.JARVIS_WHISPER_SERVER });
+    return;
+  }
+  if (!have('whisper-server') || !modelPath()) return;
+
+  const port = Number(process.env.JARVIS_WHISPER_PORT) || 8910;
+  const origin = `http://127.0.0.1:${port}`;
+
+  try {
+    serverProcess = spawn(
+      'whisper-server',
+      ['-m', modelPath(), '--port', String(port), '--host', '127.0.0.1', '-t', String(threads())],
+      { stdio: ['ignore', 'ignore', 'pipe'] }
+    );
+  } catch (err) {
+    log.warn('could not start whisper-server; falling back to the command line', {
+      error: err.message,
+    });
+    return;
+  }
+
+  serverProcess.stderr.on('data', (chunk) => {
+    const text = String(chunk).trim();
+    // Its startup chatter is not a problem; only say something if it fails outright.
+    if (/error|failed/i.test(text)) log.warn('whisper-server', { said: text.slice(0, 160) });
+  });
+
+  serverProcess.on('exit', (code) => {
+    if (serverProcess) log.warn('whisper-server exited', { code });
+    serverProcess = null;
+    serverOrigin = '';
+  });
+
+  serverOrigin = origin;
+  log.good('whisper model stays loaded', {
+    at: origin,
+    note: 'the model is no longer re-read for every utterance',
+  });
+}
+
+/** Stop it. Called on shutdown; it is our process to clean up. */
+function stopServer() {
+  if (!serverProcess) return;
+  const doomed = serverProcess;
+  serverProcess = null;
+  serverOrigin = '';
+  try {
+    doomed.kill('SIGTERM');
+  } catch {
+    /* gone */
+  }
+}
+
+/**
+ * POST, tolerating the server still coming up.
+ *
+ * Core starts listening before whisper-server has finished loading its model, so the first
+ * utterance of a session can arrive at a socket nobody is listening on yet. That is a wait,
+ * not a failure.
+ */
+async function postWithRetry(url, body, attempts = 6) {
+  let last;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fetch(url, { method: 'POST', body, signal: AbortSignal.timeout(30_000) });
+    } catch (err) {
+      last = err;
+      // Only a refused connection is worth waiting out; a timeout means it is up and stuck.
+      if (!/ECONNREFUSED|fetch failed/i.test(String(err.message))) throw err;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  throw new Error(`whisper-server unreachable at ${url}: ${last && last.message}`);
+}
+
 /** Whichever whisper.cpp binary this machine has, decided once. */
 let whisperCppResolved;
 function whisperCppBinary() {
@@ -325,6 +455,9 @@ function init(options = {}) {
   } catch {
     workDir = os.tmpdir();
   }
+
+  // Before choosing, so the resident transcriber is available to be chosen.
+  startServer();
 
   capture = CAPTURE.find((c) => c.available()) || null;
   transcriber = TRANSCRIBE.find((t) => t.available()) || null;
@@ -497,4 +630,4 @@ const isListening = () => listening;
 
 // CAPTURE and TRANSCRIBE are exported the way intents.js exports INTENTS: so the provider
 // chains can be exercised directly, without needing a microphone or a network.
-module.exports = { init, start, stop, describe, isListening, MAX_UTTERANCE_S, CAPTURE, TRANSCRIBE };
+module.exports = { init, start, stop, stopServer, describe, isListening, MAX_UTTERANCE_S, CAPTURE, TRANSCRIBE };
