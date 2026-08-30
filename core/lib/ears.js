@@ -462,8 +462,8 @@ let measuredThreshold = null;
  * room: a floor at 6.7% RMS against a 3% threshold, which is why a two-second command took
  * more than ten seconds to come back.
  *
- * So it is measured rather than assumed, once, when listening starts. Twice the floor, which
- * is not a guess either — running a real recording of speech through the gate at a range of
+ * So it is measured rather than assumed, once, when listening starts. The multiplier is not
+ * a guess either — it comes from running a real recording of speech through the gate at a range of
  * thresholds, in that room, on that microphone:
  *
  *    5-10%   keeps 4.6s of a 5s clip   the floor holds the gate open; barely trims
@@ -487,30 +487,50 @@ function threshold() {
  */
 async function calibrate() {
   if (Number(config.threshold || process.env.JARVIS_MIC_THRESHOLD) > 0) return;
-  if (!have('arecord')) return;
+  if (!have('arecord') || !have('sox')) return;
 
   const sample = path.join(workDir, `calibrate-${Date.now()}.wav`);
 
   const captured = await runCommand(
-    'arecord', ['-q', '-f', 'S16_LE', '-c', '1', '-r', '16000', '-d', '2', sample], 8000
+    'arecord', ['-q', '-f', 'S16_LE', '-c', '1', '-r', '16000', '-d', '3', sample], 10_000
   );
   if (captured.status !== 0) return;
 
-  // sox reads the level; discarding the first second avoids the device waking up mid-sample.
-  const measured = await runCommand(
-    'sox', [sample, '-n', 'trim', '1', 'stat'], 8000
-  );
+  // The quietest half-second wins, not the average.
+  //
+  // A single reading is not safe to trust: the capture device wakes up with a burst that
+  // reads far louder than the room, and one cough during the sample would set the gate for
+  // the evening. Measured here, that transient produced a floor of 12.5% in a room whose
+  // real floor was 5.4%, and a gate at twice that would have ignored everything said to it.
+  //
+  // The first second is skipped for the same reason, and the lowest window after it is the
+  // one closest to the truth.
+  const windows = [1.0, 1.5, 2.0, 2.5];
+  const levels = [];
+
+  for (const from of windows) {
+    const measured = await runCommand(
+      'sox', [sample, '-n', 'trim', String(from), '0.5', 'stat'], 8000
+    );
+    const found = /RMS\s+amplitude:\s+([0-9.]+)/.exec(String(measured.stderr || ''));
+    if (found) levels.push(Number(found[1]) * 100);
+  }
+
   fs.unlink(sample, () => {});
+  if (!levels.length) return;
 
-  const rms = /RMS\s+amplitude:\s+([0-9.]+)/.exec(String(measured.stderr || ''));
-  if (!rms) return;
+  const floor = Math.min(...levels);
 
-  const floor = Number(rms[1]) * 100;
-  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 2)));
+  // 2.5x. From running real speech through the gate at every threshold, in the room this
+  // was written for: below 10% the floor holds the gate open and nothing is trimmed, above
+  // 20% it starts cutting the front off sentences, and 12-15% keeps the speech and drops
+  // the silence. A 5.4% floor times 2.5 lands at 13%.
+  measuredThreshold = Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, floor * 2.5)));
 
   log.good('room measured', {
     noise_floor: `${floor.toFixed(1)}%`,
     speech_starts_above: `${measuredThreshold}%`,
+    samples: levels.map((l) => l.toFixed(1)).join(' '),
   });
 }
 
