@@ -151,6 +151,35 @@ const called = new Set();
 /** Heartbeat timers, so they can be stopped when the suite finishes. */
 const beats = [];
 
+/**
+ * Hold an event stream open the way a real client does — by reading it.
+ *
+ * `fetch()` alone is not enough. Its Response carries an unread body, and an unread body is
+ * a connection the runtime is entitled to tear down; when it does, Core sees the socket
+ * close and marks the device offline. That is correct behaviour on Core's part and a bug in
+ * the harness, and it surfaced as unrelated checks failing with "offline" on a slow machine
+ * while passing on a fast one.
+ */
+function hold(url) {
+  const controller = new AbortController();
+  streams.push(controller);
+
+  fetch(url, { signal: controller.signal })
+    .then(async (response) => {
+      const reader = response.body.getReader();
+      // Drain until aborted. The bytes are not interesting; consuming them is.
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+    })
+    .catch(() => {
+      /* aborted at teardown, or Core went away */
+    });
+
+  return controller;
+}
+
 async function api(method, route, body, token = ADMIN) {
   called.add(`${method} ${route.split('?')[0]}`);
   const options = { method, headers: {} };
@@ -191,12 +220,8 @@ async function enrol(hostname, deviceOs, wall = false) {
   if (status !== 'OK') throw new Error(`enrol ${hostname}: ${status} ${number}`);
 
   // Hold the stream. Presence follows this connection, so dropping it drops the device.
-  const controller = new AbortController();
-  streams.push(controller);
   called.add('GET /api/agent/stream');
-  fetch(`${BASE}/api/agent/stream?device=${number}&session=${session}`, {
-    signal: controller.signal,
-  }).catch(() => {});
+  hold(`${BASE}/api/agent/stream?device=${number}&session=${session}`);
 
   // Beat like a real agent does.
   //
@@ -224,12 +249,8 @@ async function enrol(hostname, deviceOs, wall = false) {
 async function attachOverlay(device) {
   const minted = await api('POST', '/api/overlay/url', { node: String(device.number) });
   const url = new URL(minted.data.url);
-  const controller = new AbortController();
-  streams.push(controller);
   called.add('GET /api/overlay/stream');
-  fetch(`${BASE}/api/overlay/stream?device=${device.number}&ticket=${url.searchParams.get('ticket')}`, {
-    signal: controller.signal,
-  }).catch(() => {});
+  hold(`${BASE}/api/overlay/stream?device=${device.number}&ticket=${url.searchParams.get('ticket')}`);
   await sleep(250);
 }
 
