@@ -85,6 +85,8 @@ function init(options = {}) {
     skipPermissions: options.skipPermissions !== false,
     // low | medium | high. Lower is quicker; the room commands do not need deliberation.
     effort: options.effort || process.env.JARVIS_AGY_EFFORT || '',
+    // Who JARVIS is. See prime().
+    instructions: options.instructions || '',
   };
 
   available = have(config.bin);
@@ -191,7 +193,8 @@ function warm() {
         ms: Date.now() - startedAt,
         note: 'this cost is now paid; questions no longer wait for it',
       });
-      resolve({ ok: true, ms: Date.now() - startedAt });
+      // Priming is a turn of its own, so it happens here rather than delaying readiness.
+      prime().finally(() => resolve({ ok: true, ms: Date.now() - startedAt }));
     };
 
     mine.stdout.on('data', (chunk) => {
@@ -293,6 +296,31 @@ function onResult(result) {
   settle.resolve({ ok: true, answer, ms });
 }
 
+/**
+ * Tell it who it is, once.
+ *
+ * agy does not read `.agents/AGENTS.md` — verified by asking a running one its own name and
+ * being told "Antigravity on Google Cloud". So the personality never reached the model, and
+ * every rule in it was silently ignored. That is why answers came back as markdown bulleted
+ * lists: nothing had told it that its output is read aloud by a speech synthesiser.
+ *
+ * Sent as the first turn of the persistent conversation rather than prepended to every
+ * prompt. It costs one turn at boot, stays in context for the whole session, and lands in
+ * the prompt cache — measured, cached tokens go from 8k on turn one to 16k after, so the
+ * turns that follow are cheaper for it rather than more expensive.
+ */
+function prime() {
+  if (!config.instructions) return Promise.resolve({ ok: true, skipped: true });
+
+  return send(config.instructions, 30_000)
+    .then((result) => {
+      if (result.ok) log.good('agy primed', { chars: config.instructions.length });
+      else log.warn('could not prime agy; it will answer without its personality', result);
+      return result;
+    })
+    .catch(() => ({ ok: false }));
+}
+
 /* ------------------------------------------------------------------------------------
  * Asking
  * --------------------------------------------------------------------------------- */
@@ -337,17 +365,26 @@ async function ask(text) {
   }
 
   log.info('ASK', { prompt: prompt.slice(0, 120) });
+  return send(prompt, config.timeoutMs);
+}
 
+/**
+ * One turn: write a line, wait for its result.
+ *
+ * Replies are not tagged, so this relies on one turn being in flight at a time — which the
+ * `pending` guard above and Core's own guard both enforce.
+ */
+function send(prompt, timeoutMs) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
 
     const guard = setTimeout(() => {
-      log.warn('ask timed out', { after_ms: config.timeoutMs });
+      log.warn('turn timed out', { after_ms: timeoutMs });
       // A turn cannot be cancelled, so the process is no longer in a known state. Dropping
       // it is the only way back to one; the next question pays a restart.
-      failPending({ ok: false, error: 'timeout', detail: `No answer within ${config.timeoutMs}ms.` });
+      failPending({ ok: false, error: 'timeout', detail: `No answer within ${timeoutMs}ms.` });
       stop();
-    }, config.timeoutMs);
+    }, timeoutMs);
     guard.unref();
 
     pending = { resolve, guard, startedAt };
