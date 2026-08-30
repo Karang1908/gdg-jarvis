@@ -17,6 +17,7 @@
     "test:ears": "node core/test/ears.test.js",
     "test:phrases": "node core/test/phrases.test.js",
     "test:voice": "node core/test/voice.test.js",
+    "test:ask": "node core/test/ask.test.js",
     "test:api": "node core/test/api.test.js"
   },
   "_dependencies": "There are none, on purpose. During the demo the Kali machine's Wi-Fi is the access point, so it has no internet \u2014 a Core that needs `npm install` is a Core that can fail to start at the venue. See docs/DEVIATIONS.md D1.",
