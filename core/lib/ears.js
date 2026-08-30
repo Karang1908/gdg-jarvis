@@ -56,6 +56,8 @@ let capture = null;
 let isSelf = () => false;
 let transcriber = null;
 let listening = false;
+/** Finishing the sentence that was already in progress when the microphone was closed. */
+let draining = false;
 let current = null;
 let onTranscript = null;
 let workDir = null;
@@ -724,9 +726,14 @@ function recordOnce() {
       clearTimeout(guard);
       current = null;
 
-      // Killed on purpose when the mic is switched off mid-utterance.
-      if (signal && !listening) return resolve({ ok: false, error: 'stopped' });
-
+      // A recording cut short by the mic being closed is still a recording.
+      //
+      // This used to be thrown away, on the reasoning that a command firing after the
+      // button was pressed is what the button exists to prevent. That is backwards for the
+      // way the button is actually used: it is pressed to say a sentence and pressed again
+      // when the sentence is done, and discarding what was just said makes it useless.
+      // sox flushes what it has on the way out — verified, a killed capture reads back
+      // cleanly — so it is worth transcribing like any other.
       if (code !== 0 && !fs.existsSync(file)) {
         return resolve({ ok: false, error: 'capture_failed', detail: stderr.trim().slice(0, 160) });
       }
@@ -766,12 +773,15 @@ function tidy(text) {
 }
 
 async function loop() {
-  while (listening) {
+  while (listening || draining) {
     const recorded = await recordOnce();
-    if (!listening) break;
+
+    // Whatever this pass captured is finished properly even if the microphone has since
+    // been closed; the loop simply does not open another.
+    const lastPass = !listening;
 
     if (!recorded.ok) {
-      if (recorded.error === 'stopped') break;
+      if (lastPass) break;
       // sox only returns once it has heard something, so an empty recording means it was
       // interrupted or the device misbehaved — not ordinary silence. Said out loud, because
       // a microphone that is on and producing nothing is the single most confusing state
@@ -782,6 +792,7 @@ async function loop() {
         });
         continue;
       }
+      if (lastPass) break;
       log.warn('could not record', { detail: recorded.detail || recorded.error });
       // A capture that fails instantly would spin. Pause before trying again.
       await new Promise((r) => setTimeout(r, 1500));
@@ -800,13 +811,6 @@ async function loop() {
     }
 
     fs.unlink(recorded.file, () => {});
-
-    // Silence transcribes to nothing, or to a stray "you" / "thanks" that whisper emits for
-    // near-silence. Neither is worth waking the room for.
-    // Re-checked after transcribing, not just after recording: transcription takes seconds,
-    // and a command that fires after the presenter has already closed the microphone is
-    // exactly the kind of thing the button exists to prevent.
-    if (!listening) break;
 
     // Do not act on JARVIS's own voice.
     //
@@ -836,7 +840,11 @@ async function loop() {
         .then(() => onTranscript(text))
         .catch((err) => log.error('handling what was heard threw', { error: err.message }));
     }
+
+    if (lastPass) break;
   }
+
+  draining = false;
 }
 
 function start(handler) {
@@ -860,18 +868,30 @@ function start(handler) {
   return { ok: true, ...describe() };
 }
 
+/**
+ * Close the microphone, and finish the sentence.
+ *
+ * Stopping means "hear nothing further", not "forget what I just said". The button is used
+ * as push-to-talk — pressed to speak, pressed again once the sentence is done — so the
+ * recording in progress is ended and then transcribed and acted on like any other. Only
+ * after that does the loop stop.
+ */
 function stop() {
   if (!listening) return { ok: true, ...describe() };
 
   listening = false;
+  draining = true;
+
   if (current) {
     try {
+      // Ends the capture; sox writes out what it has rather than losing it.
       current.kill('SIGTERM');
     } catch {
       /* gone */
     }
   }
-  log.info('microphone closed');
+
+  log.info('microphone closed', { note: 'finishing what was already said' });
   return { ok: true, ...describe() };
 }
 

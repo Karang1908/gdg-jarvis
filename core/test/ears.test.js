@@ -126,6 +126,7 @@ async function main() {
 
   await residentServer();
   await responsiveness();
+  await finishesTheSentence();
 
   if (failures === 0) {
     console.log('\nPASS  ears: the transcription request is well formed, failures explain themselves, and listening never blocks\n');
@@ -275,6 +276,64 @@ async function residentServer() {
   delete process.env.JARVIS_WHISPER_SERVER;
   fs.unlinkSync(clip);
   await new Promise((r) => server.close(r));
+}
+
+/**
+ * Closing the microphone must not discard what was already said.
+ *
+ * The button is push-to-talk: pressed to speak, pressed again when the sentence is done. A
+ * stop that threw away the recording in progress made it useless — the presenter would say
+ * the whole command, release, and nothing would happen.
+ */
+async function finishesTheSentence() {
+  console.log('\nClosing the microphone');
+
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-drain-'));
+
+  // Records for a long time, so stop() always lands mid-capture — the case that matters.
+  // Writes as it goes, the way sox flushes what it has when it is ended.
+  fs.writeFileSync(path.join(bin, 'rec'),
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) out="$a";; esac; done\n' +
+    'head -c 64000 /dev/zero > "$out"\nsleep 20\nexit 0\n', { mode: 0o755 });
+
+  fs.writeFileSync(path.join(bin, 'whisper'),
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) s="$a";; esac; done\n' +
+    'echo "take the room" > "${s%.wav}.txt"\nexit 0\n', { mode: 0o755 });
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  delete process.env.JARVIS_WHISPER_SERVER;
+
+  const ready = ears.init({});
+  if (!ready.available) {
+    console.log('  · skipped — could not stage stub binaries');
+    process.env.PATH = originalPath;
+    return;
+  }
+
+  const heard = [];
+  ears.start(async (text) => { heard.push(text); });
+
+  // Let it get well into a recording, then close the microphone mid-sentence.
+  await new Promise((r) => setTimeout(r, 1500));
+  ears.stop();
+
+  check('stop() reports the microphone closed', ears.isListening() === false);
+
+  // The sentence that was in progress still has to arrive.
+  await new Promise((r) => setTimeout(r, 3000));
+
+  check('what was already said is still transcribed and acted on',
+    heard.length >= 1, `handler saw ${heard.length} utterances; the one in progress was dropped`);
+
+  // And it must genuinely stop — not keep recording after being closed.
+  const seen = heard.length;
+  await new Promise((r) => setTimeout(r, 2500));
+  check('and nothing further is picked up once it has drained',
+    heard.length === seen, `grew from ${seen} to ${heard.length} after stopping`);
+
+  process.env.PATH = originalPath;
+  fs.rmSync(bin, { recursive: true, force: true });
 }
 
 main();
