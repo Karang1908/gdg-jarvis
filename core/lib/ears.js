@@ -580,6 +580,27 @@ function recordOnce() {
       if (code !== 0 && !fs.existsSync(file)) {
         return resolve({ ok: false, error: 'capture_failed', detail: stderr.trim().slice(0, 160) });
       }
+
+      // A recording with no audio in it is not worth a round trip. sox writes a bare
+      // 44-byte header when it captures nothing — when the microphone is switched off
+      // mid-utterance, or the device hiccups — and sending that to a recogniser produces a
+      // decode error that reads like a broken transcriber rather than an empty recording.
+      //
+      // 16 kHz mono 16-bit is 32000 bytes a second, so this is a fifth of a second of sound.
+      // Nobody says anything in less.
+      const bytes = (() => {
+        try {
+          return fs.statSync(file).size;
+        } catch {
+          return 0;
+        }
+      })();
+
+      if (bytes < 44 + 6400) {
+        fs.unlink(file, () => {});
+        return resolve({ ok: false, error: 'nothing_heard' });
+      }
+
       resolve({ ok: true, file });
     });
   });
@@ -601,6 +622,8 @@ async function loop() {
 
     if (!recorded.ok) {
       if (recorded.error === 'stopped') break;
+      // Silence is the normal case between utterances, not a fault worth reporting.
+      if (recorded.error === 'nothing_heard') continue;
       log.warn('could not record', { detail: recorded.detail || recorded.error });
       // A capture that fails instantly would spin. Pause before trying again.
       await new Promise((r) => setTimeout(r, 1500));

@@ -54,8 +54,14 @@ def parse_multipart(body: bytes, content_type: str) -> bytes:
         headers = part[:split].decode("latin-1", "replace")
         if 'name="file"' not in headers:
             continue
-        # Trailing CRLF belongs to the delimiter, not the file.
-        return part[split + 4:].rstrip(b"\r\n-")
+        data = part[split + 4:]
+        # Exactly one CRLF belongs to the delimiter. Stripping a *set* of trailing bytes
+        # here was a real bug: WAV samples end in 0x0D, 0x0A and 0x2D often enough, and
+        # eating them truncated the audio into something the decoder rejected with
+        # "invalid data found while processing input" — intermittently, which is worse.
+        if data.endswith(b"\r\n"):
+            data = data[:-2]
+        return data
 
     raise ValueError('no "file" field in the request')
 

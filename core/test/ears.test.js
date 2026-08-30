@@ -155,9 +155,11 @@ async function responsiveness() {
 
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-ears-bin-'));
 
+  // 32000 bytes is one second at 16 kHz mono 16-bit. Core drops anything shorter as
+  // silence, so a stub that writes a token few bytes would be testing the wrong path.
   fs.writeFileSync(path.join(bin, 'rec'),
     '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) out="$a";; esac; done\n' +
-    'head -c 2048 /dev/zero > "$out"\nexit 0\n', { mode: 0o755 });
+    'head -c 32000 /dev/zero > "$out"\nexit 0\n', { mode: 0o755 });
 
   // Slow enough to be obvious if it ever blocks the loop again.
   fs.writeFileSync(path.join(bin, 'whisper'),
