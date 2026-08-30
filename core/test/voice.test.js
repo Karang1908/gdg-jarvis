@@ -1,11 +1,14 @@
 'use strict';
 
 /**
- * The latency budget, which is the whole of "best quality, and not one second past four".
+ * The latency budget: off by default, and correct when someone turns it on.
  *
- * The budget on its own would be a bad trade — cut the good voice off at four seconds and
- * you get the robotic one instead, which is worse than waiting. What makes it work is the
- * two behaviours either side of it, and those are what this pins:
+ * Capping synthesis is the wrong default and has been tried twice. A cap does not shorten a
+ * line, it decides whether the line is spoken well or badly — and since synthesis time
+ * scales with length, any ceiling lands hardest on the longest sentences. So the default is
+ * no cap, and these assert that a budget still behaves when a venue explicitly asks for one.
+ *
+ * Two behaviours make an opt-in budget survivable, and they are what this pins:
  *
  *   A line that blows the budget is still synthesised in the background and still cached.
  *   So the room hears the fallback once, and the good voice every time after.
@@ -109,14 +112,18 @@ async function main() {
     String(voice.describe().budgetMs));
 
   voice.init({ cacheDir: CACHE });
-  const fallbackDefault = voice.describe().budgetMs;
-  check('unset falls back to the four-second requirement', fallbackDefault === 4000,
-    String(fallbackDefault));
+  check('unset means no cap — a long line is not punished for being long',
+    voice.describe().budgetMs === 0, String(voice.describe().budgetMs));
+
+  // The budget still has to work when a venue actually asks for one.
+  voice.init({ cacheDir: CACHE, budgetMs: 1500 });
+  check('an explicit budget is still honoured', voice.describe().budgetMs === 1500,
+    String(voice.describe().budgetMs));
 
   fs.rmSync(CACHE, { recursive: true, force: true });
 
   if (failures === 0) {
-    console.log('\nPASS  voice: the budget caps the wait without costing the quality twice\n');
+    console.log('\nPASS  voice: no cap by default, and an opt-in budget never costs the quality twice\n');
   } else {
     console.error(`\nFAIL  ${failures} check(s)\n`);
     process.exit(1);
