@@ -31,8 +31,18 @@ const log = require('./log');
 /** Longest single utterance. Anything past this is a presenter talking to the room. */
 const MAX_UTTERANCE_S = 12;
 
-/** Silence that ends an utterance. Shorter and it cuts people off mid-sentence. */
-const SILENCE_S = 1.2;
+/**
+ * Silence that ends an utterance.
+ *
+ * Paid on every single thing anyone says, command or question, so it is the largest fixed
+ * cost on the fast path — a spoken command is about two seconds end to end and this is most
+ * of the part that is not the recogniser.
+ *
+ * 0.8s rather than 1.2s. Short enough to feel prompt, long enough to survive the pause
+ * somebody takes in the middle of "identify... device two". Below about 0.6s it starts
+ * cutting people off mid-sentence, which costs far more than it saves.
+ */
+const SILENCE_S = 0.8;
 
 let config = {};
 let capture = null;
@@ -146,7 +156,11 @@ const TRANSCRIBE = [
     async run(file) {
       // Resolved once at startup rather than probed per utterance — `command -v` is a
       // synchronous spawn, and this path runs on every single thing anyone says.
-      const result = await runCommand(whisperCppBinary(), ['-m', modelPath(), '-f', file, '-nt', '-l', 'en'], 30_000);
+      const result = await runCommand(
+        whisperCppBinary(),
+        ['-m', modelPath(), '-f', file, '-nt', '-l', 'en', '-t', String(threads())],
+        30_000
+      );
       if (result.status !== 0) throw new Error(String(result.stderr || '').slice(0, 160));
       return result.stdout;
     },
@@ -246,6 +260,19 @@ function whisperCppBinary() {
     whisperCppResolved = have('whisper-cli') ? 'whisper-cli' : have('whisper-cpp') ? 'whisper-cpp' : null;
   }
   return whisperCppResolved;
+}
+
+/**
+ * How many threads whisper.cpp may use.
+ *
+ * It was passing none, so it took the binary's own default rather than this machine's
+ * shape. Capped at four: transcription scales with physical cores, and hyperthreads past
+ * that buy little while competing with Core and the browser for the same laptop.
+ */
+function threads() {
+  const asked = Number(config.threads || process.env.JARVIS_WHISPER_THREADS);
+  if (Number.isInteger(asked) && asked > 0) return asked;
+  return Math.max(1, Math.min(4, os.cpus().length));
 }
 
 /** Which Python whisper model. tiny.en is the one that keeps up with a live demo. */
