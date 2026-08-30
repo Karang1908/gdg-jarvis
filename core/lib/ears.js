@@ -635,8 +635,16 @@ async function loop() {
 
     if (!recorded.ok) {
       if (recorded.error === 'stopped') break;
-      // Silence is the normal case between utterances, not a fault worth reporting.
-      if (recorded.error === 'nothing_heard') continue;
+      // sox only returns once it has heard something, so an empty recording means it was
+      // interrupted or the device misbehaved — not ordinary silence. Said out loud, because
+      // a microphone that is on and producing nothing is the single most confusing state
+      // this system has, and saying nothing about it is how an evening gets lost.
+      if (recorded.error === 'nothing_heard') {
+        log.warn('heard something too short to transcribe', {
+          note: 'if this repeats, the microphone level is probably below the trigger',
+        });
+        continue;
+      }
       log.warn('could not record', { detail: recorded.detail || recorded.error });
       // A capture that fails instantly would spin. Pause before trying again.
       await new Promise((r) => setTimeout(r, 1500));
