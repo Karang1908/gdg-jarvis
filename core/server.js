@@ -973,6 +973,7 @@ function shutdown(signal) {
   console.log('');
   log.warn(`${signal} — releasing the room before exit`);
   ears.stop();
+  ears.stopServer();
   ask.stop();
   voice.silence();
   commands.release('ALL', { source: 'shutdown' });
