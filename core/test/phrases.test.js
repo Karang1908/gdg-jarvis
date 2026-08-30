@@ -52,6 +52,20 @@ const spoken = [...source.matchAll(/say: '([^']+)'/g)].map((m) => m[1]);
 check('the intents do acknowledge out loud at all', spoken.length > 0, 'found no say: lines');
 for (const line of spoken) warmedLine(line, 'intent');
 
+console.log('\nLines Core speaks directly');
+
+// Core speaks a few things itself, outside the intent list — the acknowledgement before a
+// model call most importantly, whose entire job is to be instant. Read from source so a
+// line added here without being warmed fails rather than quietly costing a synthesis.
+const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const literals = [...serverSource.matchAll(/^const [A-Z_]+ = '([^']+)';$/gm)]
+  .map((m) => m[1])
+  .filter((line) => /\s/.test(line) && /[.?!]$/.test(line));
+
+check('Core does speak something of its own', literals.length > 0,
+  'found no spoken literals in server.js');
+for (const line of literals) warmedLine(line, 'core');
+
 console.log('\nThe spoken count, for every room this demo can have');
 
 // Built exactly as server.js builds it. If that construction changes, this drifts and the
