@@ -52,12 +52,15 @@ function clock(at) {
  * commandId, source, target, action, status, ms, error.
  */
 function record(level, message, fields = {}) {
+  // Caller fields first, so a field named `at` or `level` cannot overwrite the entry's own.
+  // It has happened: a log call passing `at: <a url>` produced entries stamped "Invalid",
+  // because the timestamp had been replaced by a string Date could not parse.
   const entry = {
+    ...fields,
     seq: ++sequence,
     at: Date.now(),
     level,
     message,
-    ...fields,
   };
 
   entries.push(entry);
