@@ -132,7 +132,12 @@ try {
   personality.load(options.personality, options.memory);
 
   // Runs from the repository root so agy picks up .agents/AGENTS.md as its persona.
-  ask.init({ cwd: path.join(__dirname, '..') });
+  // The personality goes to agy explicitly: it does not read .agents/AGENTS.md, so without
+  // this it answers as a generic assistant — in markdown, at length, out loud.
+  ask.init({
+    cwd: path.join(__dirname, '..'),
+    instructions: personality.get().body,
+  });
 
   // Start agy now rather than on the first question. It takes about five seconds to be
   // ready, and the difference between paying that while someone is plugging in the
@@ -575,6 +580,15 @@ router.post('/api/identify', async (req, res, context) => {
  * to the model. Shared by the microphone and by any client that wants to send a sentence,
  * so both take exactly the same path.
  */
+/**
+ * Said the moment a question goes to the model, before it has answered.
+ *
+ * Warmed in phrases.json, so it is a disk read rather than a synthesis. If it ever drifts
+ * out of that list, core/test/phrases.test.js fails — the whole point of it is to be
+ * instant, and an unwarmed version would arrive after the answer it was meant to precede.
+ */
+const ACKNOWLEDGEMENT = 'One moment, sir.';
+
 let thinking = false;
 
 async function handleUtterance(text, source) {
@@ -627,18 +641,25 @@ async function handleUtterance(text, source) {
   }
   thinking = true;
 
-  // Not one of the fixed commands, so let the model reason about it.
-  const before = voice.describe().usage;
-  const spokenBefore = before.calls + before.saved;
+  // Say something immediately.
+  //
+  // The model takes a couple of seconds even warm, and silence is the worst possible
+  // response on a stage — the presenter cannot tell whether they were heard, so they repeat
+  // themselves into a room that is already working on it. This line is warmed, so it costs
+  // a disk read and starts almost at once.
+  commands.speakAsJarvis(ACKNOWLEDGEMENT, { source });
+
+  // Counted after the acknowledgement, so only speech the model asks for lands between here
+  // and the comparison below.
+  const spokenBefore = commands.speechCount();
 
   const answered = await ask.ask(heard).finally(() => {
     thinking = false;
   });
 
-  // The model can speak for itself through the MCP speak tool. Reading the usage counter is
-  // how we tell — anything else would say the answer twice.
-  const after = voice.describe().usage;
-  if (answered.ok && answered.answer && after.calls + after.saved === spokenBefore) {
+  // The model can speak for itself through the MCP speak tool. If it did, repeating the
+  // answer would say everything twice.
+  if (answered.ok && answered.answer && commands.speechCount() === spokenBefore) {
     commands.speakAsJarvis(answered.answer, { source });
   }
 
@@ -721,13 +742,12 @@ router.post('/api/ask', async (req, res, context) => {
   const body = await readBody(req);
   if (!body) return json(res, 400, { ok: false, error: 'malformed_body' });
 
-  const before = voice.describe().usage;
-  const spokenBefore = before.calls + before.saved;
+  const spokenBefore = commands.speechCount();
 
   const result = await ask.ask(body.text);
 
-  const after = voice.describe().usage;
-  if (result.ok && result.answer && after.calls + after.saved === spokenBefore) {
+  // Exact rather than inferred from cache counters — see commands.speechCount().
+  if (result.ok && result.answer && commands.speechCount() === spokenBefore) {
     commands.speakAsJarvis(result.answer, { source: 'ask' });
   }
 
