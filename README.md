@@ -202,11 +202,12 @@ Time to first sound, measured:
 | a new line, local voice | ~470 ms |
 | a new line, Gemini | one network round trip, capped at 1s |
 
-A live call gets **four seconds**, then the local voice takes over so the room is never
-left waiting. That costs less than it sounds like: the slow call keeps running and is
-cached, so the line is instant and full quality every time after — and `warm-voice.sh`
-pre-renders everything the demo plans to say, so the budget only ever applies to sentences
-nobody anticipated. Set `JARVIS_VOICE_BUDGET_MS=0` to wait however long it takes.
+There is **no time limit** on a live call, on purpose. Synthesis time grows with sentence
+length, so any ceiling would land hardest on your longest lines — the ones where the voice
+matters most. What removes the wait is `warm-voice.sh`, which pre-renders everything the
+demo plans to say so those lines are instant and full quality; the network is only involved
+for sentences nobody anticipated. Set `JARVIS_VOICE_BUDGET_MS` if a venue's uplink turns out
+bad enough to need one.
 
 If you would rather not depend on the network at all, **Piper** is a local neural voice
 that is both natural and faster than the cloud:
