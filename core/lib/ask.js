@@ -71,6 +71,15 @@ let stdoutBuffer = '';
 let turns = 0;
 let restarts = 0;
 
+/**
+ * The last thing agy complained about.
+ *
+ * Kept so a failure can repeat it. agy says exactly what is wrong — "authentication
+ * required. Run 'agy' to log in" — and reporting only "agy could not be started" throws
+ * away the one sentence that tells the operator what to do about it.
+ */
+let lastComplaint = '';
+
 function have(command) {
   return spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
 }
@@ -203,7 +212,9 @@ function warm() {
 
     mine.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();
-      if (text && current()) log.warn('agy said', { text: text.slice(0, 200) });
+      if (!text || !current()) return;
+      lastComplaint = text.split('\n').filter(Boolean).pop().slice(0, 200);
+      log.warn('agy said', { text: text.slice(0, 200) });
     });
 
     mine.on('error', (err) => {
@@ -219,7 +230,11 @@ function warm() {
       if (!current()) return; // superseded; its replacement is the live one
       clearTimeout(guard);
       const wasReady = ready;
-      failPending({ ok: false, error: 'agy_exited', detail: `agy exited (${code})` });
+      failPending({
+        ok: false,
+        error: 'agy_exited',
+        detail: lastComplaint || `agy exited (${code})`,
+      });
       teardown();
       // Only worth saying if it had been working; a failure to start is already reported.
       if (wasReady) log.warn('agy exited; it will be restarted on the next question', { code });
@@ -359,7 +374,9 @@ async function ask(text) {
       return {
         ok: false,
         error: started.error || 'agy_unavailable',
-        detail: started.detail || 'agy could not be started.',
+        // agy's own words where it gave any: it says whether it is unauthenticated, which
+        // is a thing the operator can act on, unlike "could not be started".
+        detail: started.detail || lastComplaint || 'agy could not be started.',
       };
     }
   }
