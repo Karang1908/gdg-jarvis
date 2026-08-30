@@ -74,7 +74,12 @@ const INTENTS = [
   },
   {
     name: 'scene',
-    test: new RegExp(WAKE + '(?:show|display|switch to|go to)\\s+(?:me\\s+)?(?:the\\s+)?(jarvis|reactor|architecture|network|terminal|gdg|red alert|blackout|wall)'),
+    // `the` is written as an alternation because a recogniser really does return "their"
+    // and "there" for it — measured, playing a line through the room's own speakers into
+    // its own microphone: "show me the architecture" came back as "show me their
+    // architecture" and matched nothing. The article carries no meaning here; the scene
+    // name still has to be exact, which is what keeps this from matching loose speech.
+    test: new RegExp(WAKE + '(?:show|display|switch to|go to)\\s+(?:me\\s+)?(?:(?:the|their|there|a|that)\\s+)?(jarvis|reactor|architecture|network|terminal|gdg|red alert|blackout|wall)'),
     plan: (m) => {
       let scene = m[1].replace(/\s+/g, '_');
       if (scene === 'architecture') scene = 'network';
@@ -93,7 +98,10 @@ const INTENTS = [
   },
   {
     name: 'identify',
-    test: new RegExp(WAKE + '(?:identify|which is|show me|find)\\s+(?:device\\s+|number\\s+)?(\\S+)'),
+    // Inflections of the verb, for the same reason: "identify device two" comes back as
+    // "identified device 2" often enough to matter, and no other reading of "identified
+    // device N" exists in this room.
+    test: new RegExp(WAKE + '(?:identif(?:y|ied|ies)|which is|show me|find)\\s+(?:device\\s+|number\\s+)?(\\S+)'),
     plan: (m) => ({ route: '/api/identify', body: { target: m[1] }, label: 'IDENTIFY', needsDevice: m[1] }),
   },
   {
