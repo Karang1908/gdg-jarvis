@@ -311,17 +311,34 @@ function startServer() {
     log.info('using the whisper server you configured', { url: process.env.JARVIS_WHISPER_SERVER });
     return;
   }
-  if (!have('whisper-server') || !modelPath()) return;
-
   const port = Number(process.env.JARVIS_WHISPER_PORT) || 8910;
   const origin = `http://127.0.0.1:${port}`;
 
+  // Two ways to have a resident whisper, and the second is the one that works on a machine
+  // where the distribution ships libwhisper but not the tools.
+  let command;
+  let args;
+
+  if (have('whisper-server') && modelPath()) {
+    command = 'whisper-server';
+    args = ['-m', modelPath(), '--port', String(port), '--host', '127.0.0.1', '-t', String(threads())];
+  } else {
+    const python = pythonWithFasterWhisper();
+    const script = path.join(__dirname, '..', '..', 'scripts', 'whisper-server.py');
+    if (!python || !fs.existsSync(script)) return;
+    command = python;
+    args = [
+      script,
+      '--model', whisperSize(),
+      '--port', String(port),
+      '--host', '127.0.0.1',
+      '--threads', String(threads()),
+      '--download-dir', path.join(__dirname, '..', 'config', 'whisper'),
+    ];
+  }
+
   try {
-    serverProcess = spawn(
-      'whisper-server',
-      ['-m', modelPath(), '--port', String(port), '--host', '127.0.0.1', '-t', String(threads())],
-      { stdio: ['ignore', 'ignore', 'pipe'] }
-    );
+    serverProcess = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
   } catch (err) {
     log.warn('could not start whisper-server; falling back to the command line', {
       error: err.message,
@@ -343,9 +360,37 @@ function startServer() {
 
   serverOrigin = origin;
   log.good('whisper model stays loaded', {
+    model: whisperSize(),
     at: origin,
     note: 'the model is no longer re-read for every utterance',
   });
+}
+
+/**
+ * A python that can run the resident transcriber.
+ *
+ * The repo's own virtualenv first: on a Debian-family machine that is where faster-whisper
+ * can actually be installed without fighting the system package manager, so it is where it
+ * will be. Falls back to whatever python3 is on PATH.
+ */
+function pythonWithFasterWhisper() {
+  const candidates = [
+    process.env.JARVIS_WHISPER_PYTHON,
+    path.join(__dirname, '..', '..', '.venv', 'bin', 'python'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const probe = spawnSync(candidate, ['-c', 'import faster_whisper'], { stdio: 'ignore' });
+    if (probe.status === 0) return candidate;
+  }
+
+  const system = spawnSync('sh', ['-c', 'command -v python3'], { encoding: 'utf8' });
+  const python3 = String(system.stdout || '').trim();
+  if (python3 && spawnSync(python3, ['-c', 'import faster_whisper'], { stdio: 'ignore' }).status === 0) {
+    return python3;
+  }
+  return null;
 }
 
 /** Stop it. Called on shutdown; it is our process to clean up. */
