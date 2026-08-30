@@ -223,11 +223,37 @@ if (!canSynthesise) {
   process.exit(1);
 }
 
+/**
+ * Warming is rate limited, so it has to be patient rather than fast.
+ *
+ * Measured against a free-tier key: three requests per minute for the TTS model. Firing the
+ * whole list at once means the first few succeed and every one after is refused, which is
+ * exactly what happened — 23 of 28 lines failed in 15 seconds and the cache stayed empty.
+ *
+ * So: wait between lines, and when the API says to come back later, come back later. This
+ * takes minutes rather than seconds. That is the correct trade — it runs once, before the
+ * demo, and what it buys is every scripted line playing instantly and in the good voice for
+ * the rest of the evening.
+ */
+const GAP_MS = Number(process.env.JARVIS_WARM_GAP_MS) || 21_000;
+const RETRIES = 4;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
 (async () => {
   let made = 0;
   let hit = 0;
   let failed = 0;
   const started = Date.now();
+
+  const todo = lines.filter((line) => !voice.isCached(line));
+  if (todo.length > 1) {
+    const estimate = Math.ceil((todo.length * GAP_MS) / 60000);
+    console.log(`  \x1b[90m${todo.length} to generate, pacing for the rate limit — about ${estimate} min\x1b[0m`);
+    console.log("");
+  }
+
+  let first = true;
 
   for (const line of lines) {
     if (voice.isCached(line)) {
@@ -236,8 +262,22 @@ if (!canSynthesise) {
       continue;
     }
 
+    // Not before the first, so a single line stays quick.
+    if (!first) await wait(GAP_MS);
+    first = false;
+
     const at = Date.now();
-    const result = await voice.synthesise(line);
+    let result = null;
+
+    for (let attempt = 0; attempt <= RETRIES && !result; attempt++) {
+      if (attempt > 0) {
+        // Backs off well past the one-minute window the limit is measured over.
+        const backoff = 30_000 * attempt;
+        console.log(`  \x1b[33m⟳\x1b[0m rate limited, waiting ${backoff / 1000}s — ${line}`);
+        await wait(backoff);
+      }
+      result = await voice.synthesise(line);
+    }
 
     if (result) {
       made++;
@@ -254,7 +294,8 @@ if (!canSynthesise) {
 
   if (failed) {
     console.log("");
-    console.log("  \x1b[33m!\x1b[0m some lines failed — check the API key and that this machine has internet");
+    console.log("  \x1b[33m!\x1b[0m some lines failed — usually the rate limit. Run it again;");
+    console.log("      whatever succeeded is cached, so each run has less left to do.");
   }
   process.exit(failed ? 1 : 0);
 })();
