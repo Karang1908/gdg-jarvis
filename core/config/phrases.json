@@ -1,6 +1,7 @@
 {
   "_comment": "Every line JARVIS is expected to say during the demo. Served at /api/phrases so the controller's buttons and scripts/warm-voice.sh cannot drift apart, and so warming the cache covers exactly what the demo will use. Keep them under about ten words — SPEC.md §31.",
   "phrases": [
+    "One moment, sir.",
     "Yes, sir.",
     "All systems are online.",
     "Identifying now.",
