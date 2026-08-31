@@ -135,6 +135,19 @@ console.log('\nDevices that do not exist');
 fallsThrough('jarvis take device four');
 fallsThrough('jarvis identify seven');
 
+console.log('\nAre you there');
+// The one question that must never be slow. Answered from a warmed line before the sentence
+// has finished echoing — it used to say "One moment, sir." and then, seconds later, "Yes,
+// sir.", which is a comic answer to "are you listening".
+matches('jarvis are you there', 'presence');
+matches('JARVIS. Are you there?', 'presence');
+matches('hey jarvis are you there or not', 'presence');
+matches('jarvis you there', 'presence');
+matches('can you hear me', 'presence');
+matches('jarvis are you with me', 'presence');
+// Still a count, not a presence check.
+matches('jarvis how many are online', 'count');
+
 console.log('\nAddressing JARVIS');
 // The gate on the model path. The microphone is open while the presenter talks to a room,
 // so anything not addressed to JARVIS must never reach agy — each one is a twelve-second

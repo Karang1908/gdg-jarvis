@@ -332,14 +332,26 @@ else
     || warn "could not set ap-isolation (older NetworkManager); harmless for this demo"
 
   # Survive a reboot on the day without anyone remembering to bring it back up.
-  nmcli connection modify "$CONNECTION" connection.autoconnect yes >/dev/null 2>&1 \
+  # Power saving off, and retries without limit.
+#
+# A laptop Wi-Fi card saves power by going quiet, and a card acting as an access point going
+# quiet means the room falls off the network. NetworkManager's default is also to give up
+# after a few failed retries — which on a flaky card means it gives up during the demo
+# rather than before it.
+nmcli connection modify "$CONNECTION" 802-11-wireless.powersave 2 >/dev/null 2>&1 \
+  && ok "Wi-Fi power saving off" || warn "could not disable Wi-Fi power saving"
+nmcli connection modify "$CONNECTION" connection.autoconnect-retries 0 >/dev/null 2>&1
+nmcli connection modify "$CONNECTION" connection.autoconnect yes >/dev/null 2>&1 \
     && ok "will come back automatically after a reboot"
 
   # 2.4 GHz on purpose. 5 GHz AP mode on Linux runs into DFS channels and regulatory
   # domains, and the traffic here is a few kilobytes of JSON per second.
   ok "band bg (2.4 GHz) — chosen for reliability, not throughput"
 
-  nmcli connection down "$CONNECTION" >/dev/null 2>&1
+  warn "if it still drops, have something watch it:"
+warn "  sudo scripts/hotspot-watch.sh --install"
+
+nmcli connection down "$CONNECTION" >/dev/null 2>&1
   nmcli connection up "$CONNECTION" >/dev/null 2>&1 && ok "hotspot up"
 fi
 

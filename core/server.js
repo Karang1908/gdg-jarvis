@@ -591,6 +591,18 @@ router.post('/api/identify', async (req, res, context) => {
  */
 const ACKNOWLEDGEMENT = 'One moment, sir.';
 
+/** The answer to "are you there". Warmed, so it is instant. */
+const PRESENT = 'Yes, sir.';
+
+/**
+ * How long the model gets before JARVIS admits it is thinking.
+ *
+ * Long enough that a quick answer arrives on its own — a warm agy answers a simple question
+ * in about two seconds — and short enough that a slow one never leaves the room in silence
+ * wondering whether it was heard.
+ */
+const ACKNOWLEDGE_AFTER_MS = 1_400;
+
 /**
  * How long JARVIS keeps listening after it has answered a question.
  *
@@ -635,6 +647,12 @@ async function handleUtterance(text, source) {
   if (intent) conversationUntil = 0;
 
   if (intent) {
+    // Answered from a warmed line, so it lands while the question is still in the air.
+    if (intent.answer === 'presence') {
+      commands.speakAsJarvis(PRESENT, { source });
+      return { ok: true, matched: intent.name, spoken: PRESENT };
+    }
+
     if (intent.answer === 'count') {
       const online = registry.onlineDevices().length;
       // Spelled out, not a digit: this is the exact string phrases.json warms, so the
@@ -670,19 +688,25 @@ async function handleUtterance(text, source) {
   }
   thinking = true;
 
-  // Say something immediately.
+  // Say something, but only if it is actually taking a while.
   //
-  // The model takes a couple of seconds even warm, and silence is the worst possible
-  // response on a stage — the presenter cannot tell whether they were heard, so they repeat
-  // themselves into a room that is already working on it. This line is warmed, so it costs
-  // a disk read and starts almost at once.
-  commands.speakAsJarvis(ACKNOWLEDGEMENT, { source });
+  // Silence is the worst response on a stage — the presenter cannot tell whether they were
+  // heard, so they repeat themselves into a room already working on it. But saying "One
+  // moment, sir." and then answering half a second later is worse than not saying it: two
+  // utterances where one would do, and it makes a quick answer sound laboured.
+  //
+  // So it waits. A question the model answers quickly is simply answered; one that is going
+  // to take a while gets acknowledged while it thinks.
+  let acknowledged = false;
+  const acknowledge = setTimeout(() => {
+    acknowledged = true;
+    commands.speakAsJarvis(ACKNOWLEDGEMENT, { source });
+  }, ACKNOWLEDGE_AFTER_MS);
 
-  // Counted after the acknowledgement, so only speech the model asks for lands between here
-  // and the comparison below.
   const spokenBefore = commands.speechCount();
 
   const answered = await ask.ask(heard).finally(() => {
+    clearTimeout(acknowledge);
     thinking = false;
     // Measured from the end of the answer, not the start of the question — the follow-up
     // comes after JARVIS has finished speaking, not while it is still thinking.
@@ -690,8 +714,10 @@ async function handleUtterance(text, source) {
   });
 
   // The model can speak for itself through the MCP speak tool. If it did, repeating the
-  // answer would say everything twice.
-  if (answered.ok && answered.answer && commands.speechCount() === spokenBefore) {
+  // answer would say everything twice. The acknowledgement is discounted, since it is
+  // Core's own and says nothing about whether the model spoke.
+  const spokenByModel = commands.speechCount() - spokenBefore - (acknowledged ? 1 : 0);
+  if (answered.ok && answered.answer && spokenByModel === 0) {
     commands.speakAsJarvis(answered.answer, { source });
   }
 

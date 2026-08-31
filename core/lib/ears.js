@@ -673,6 +673,10 @@ function init(options = {}) {
     ...(capture.fixedWindow ? { note: `no silence detection; ${MAX_UTTERANCE_S}s windows` } : {}),
   });
 
+  // Measure the room now, in the background, so opening the microphone later is instant.
+  // Core is still starting up; nobody is waiting on this.
+  calibrate().catch(() => {});
+
   return describe();
 }
 
@@ -855,12 +859,11 @@ function start(handler) {
   listening = true;
   log.good('microphone open', { record: capture.name, transcribe: transcriber.name });
 
-  // Measured once per session, before the first utterance, so the gate is set for the room
-  // that is actually there rather than the one the default guessed at.
-  calibrate()
-    .catch(() => {})
-    .then(() => loop())
-    .catch((err) => {
+  // Not calibrated here. Measuring takes about three seconds, and doing it on every unmute
+  // put that between pressing the button and being heard — which is the one moment in this
+  // whole system where a wait is least acceptable. It happens once at startup instead,
+  // while nobody is waiting.
+  loop().catch((err) => {
     log.error('listening stopped unexpectedly', { error: err.message });
     listening = false;
   });

@@ -125,6 +125,22 @@ const INTENTS = [
   },
   {
     /**
+     * "Are you there?"
+     *
+     * The one question that must never be answered slowly. Asked it, JARVIS used to say
+     * "One moment, sir." and then, several seconds later, "Yes, sir." — which is a comic
+     * answer to "are you listening". It is now answered before the sentence has finished
+     * echoing, from a line that is already in the cache.
+     *
+     * Deliberately tolerant of what follows: people say "are you there or not", "you there,
+     * Jarvis", "are you with me". None of it changes the question.
+     */
+    name: 'presence',
+    test: new RegExp(WAKE + '(?:are\\s+you\\s+(?:there|awake|alive|up|with\\s+me|listening|on)|you\\s+there|you\\s+awake|can\\s+you\\s+hear\\s+me)'),
+    plan: () => ({ route: null, label: 'PRESENCE', answer: 'presence' }),
+  },
+  {
+    /**
      * Only the bare question.
      *
      * "How many are online" is answered from the registry, instantly. "How many Windows
@@ -137,7 +153,7 @@ const INTENTS = [
      * it properly.
      */
     name: 'count',
-    test: new RegExp(WAKE + '(?:how many|count|status|are you there|you there)\\s*(.*)$'),
+    test: new RegExp(WAKE + '(?:how many|count|status)\\s*(.*)$'),
     plan: (m) => {
       const rest = String(m[1] || '').trim();
       // Words that merely restate "how many are online" rather than narrowing it.
