@@ -470,11 +470,21 @@ function whisperCppBinary() {
  * How loud counts as speech
  * --------------------------------------------------------------------------------- */
 
-/** Never trust a room to be quieter than this, or louder than this. */
-const MIN_THRESHOLD = 3;
+/**
+ * The band the gate is allowed to sit in, as a percentage of full scale.
+ *
+ * The lower bound used to be 3%, which was written for a room with people in it. On a quiet
+ * machine — voice isolation on, nobody else talking — the measured floor is 0.1%, so both
+ * ends of the gate clamped to 3% and became the same number. A gate with no gap between
+ * "started" and "stopped" chatters: the level crosses it, recording begins, the level dips
+ * a syllable later, recording ends, and what arrives is a fragment too short to transcribe.
+ * Repeatedly, which is exactly what it did.
+ */
+const MIN_START = 1;
+const MIN_STOP = 0.5;
 const MAX_THRESHOLD = 25;
 
-let measuredFloorPercent = MIN_THRESHOLD;
+let measuredFloorPercent = MIN_START;
 let calibrated = false;
 
 /**
@@ -503,16 +513,34 @@ function measuredFloor() {
   return measuredFloorPercent;
 }
 
-/** Low: a sentence starts quietly, and missing its first word loses the whole command. */
-function startThreshold() {
-  const at = measuredFloor() * 1.3;
-  return `${Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, at)))}%`;
+/**
+ * Where speech begins: comfortably above the room, so a chair creak is not a sentence.
+ */
+function startAt() {
+  return Math.min(MAX_THRESHOLD, Math.max(MIN_START, measuredFloor() * 3));
 }
 
-/** Higher: by the time they stop, the level is back near the room. */
+/**
+ * Where it ends: deliberately *below* where it began.
+ *
+ * This is a Schmitt trigger, and it was the wrong way round — stopping was set higher than
+ * starting, so an utterance ended the moment the level dipped below a bar it had to clear
+ * to begin. Speech crosses that bar between every syllable. To stop, you have to get
+ * quieter than you were when you started, and half is a wide enough gap to ride out the
+ * gaps inside a sentence without waiting through the pause at the end of one.
+ */
+function stopAt() {
+  return Math.max(MIN_STOP, startAt() / 2);
+}
+
+const asPercent = (value) => `${Number(value.toFixed(1))}%`;
+
+function startThreshold() {
+  return asPercent(startAt());
+}
+
 function stopThreshold() {
-  const at = measuredFloor() * 2;
-  return `${Math.round(Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, at)))}%`;
+  return asPercent(stopAt());
 }
 
 /** What the two are built from, so both move together when the room does. */
@@ -691,11 +719,41 @@ function init(options = {}) {
     ...(capture.fixedWindow ? { note: `no silence detection; ${MAX_UTTERANCE_S}s windows` } : {}),
   });
 
+  warnIfInputIsTurnedDown();
+
   // Measure the room now, in the background, so opening the microphone later is instant.
   // Core is still starting up; nobody is waiting on this.
   calibrate().catch(() => {});
 
   return describe();
+}
+
+/**
+ * Say when the microphone is turned down, because nothing else will.
+ *
+ * A low input level does not fail. It records, it transcribes, it returns an empty string
+ * or a fragment, and every layer reports success — so it reads as the recogniser being bad
+ * or the gate being wrong, and the hours go into those instead. Found at 27 out of 100 on a
+ * machine where speech was peaking at one percent of full scale; at 90 the same voice came
+ * back as a clean sentence.
+ */
+function warnIfInputIsTurnedDown() {
+  if (process.platform !== 'darwin') return;
+
+  const read = spawnSync('osascript', ['-e', 'input volume of (get volume settings)'], {
+    encoding: 'utf8',
+    timeout: 3000,
+  });
+  const level = Number(String(read.stdout || '').trim());
+  if (!Number.isFinite(level) || level < 0) return;
+
+  if (level < 50) {
+    log.warn('the microphone input is turned down', {
+      at: `${level} of 100`,
+      fix: "osascript -e 'set volume input volume 90'",
+      note: 'speech will be captured too quietly to recognise, and nothing will say so',
+    });
+  }
 }
 
 function describe() {

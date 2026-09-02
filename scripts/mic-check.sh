@@ -53,7 +53,20 @@ if [ "$BYTES" -lt 1000 ]; then
 fi
 ok "recorded $BYTES bytes"
 
-bold "2. Level"
+bold "2. Input gain"
+
+if [ "$(uname)" = "Darwin" ]; then
+  LEVEL=$(osascript -e 'input volume of (get volume settings)' 2>/dev/null)
+  if [ -n "$LEVEL" ] && [ "$LEVEL" -lt 50 ] 2>/dev/null; then
+    bad "the microphone input is at $LEVEL of 100"
+    warn "too quiet to recognise, and nothing else will tell you:"
+    warn "  osascript -e 'set volume input volume 90'"
+  else
+    ok "input gain ${LEVEL:-?} of 100"
+  fi
+fi
+
+bold "3. Level"
 
 PEAK=$(sox "$CLIP" -n stat 2>&1 | awk '/Maximum amplitude/{printf "%.3f", $3}')
 RMS=$(sox "$CLIP" -n stat 2>&1 | awk '/RMS +amplitude/{printf "%.4f", $3}')
@@ -74,7 +87,7 @@ else
   ok "a usable level"
 fi
 
-bold "3. Does it sound like you?"
+bold "4. Does it sound like you?"
 
 if command -v aplay >/dev/null 2>&1; then
   printf '  playing it back...\n'
@@ -84,7 +97,7 @@ else
   warn "no aplay, skipping playback"
 fi
 
-bold "4. Can the recogniser read it?"
+bold "5. Can the recogniser read it?"
 
 if ! curl -sf --max-time 5 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
   warn "nothing listening on port $PORT — start Core, which starts the recogniser"
