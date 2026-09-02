@@ -165,6 +165,21 @@ const INTENTS = [
 ];
 
 /**
+ * Never a device, whatever the room is called.
+ *
+ * Kept small on purpose: the length rule in the registry does most of the work, and a long
+ * list here would start refusing real machines. These are the words that actually turned up
+ * in front of a device pattern while somebody was talking to an audience.
+ */
+const NEVER_A_DEVICE = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'it', 'them', 'they',
+  'my', 'your', 'our', 'his', 'her', 'its',
+  'look', 'here', 'there', 'now', 'again', 'me', 'us', 'you',
+  'what', 'when', 'where', 'how', 'why', 'who',
+  'and', 'but', 'so', 'then', 'just', 'some', 'any', 'all',
+]);
+
+/**
  * Match a transcript.
  *
  * Returns null when nothing fits, which is the signal to hand it to the model. A spoken
@@ -187,6 +202,12 @@ function match(transcript, resolveDevice) {
     if (plan.answer === undefined && plan.route === null) return null;
 
     if (plan.needsDevice) {
+      // Words that are never a device, however much a hostname happens to contain them.
+      // The verb patterns are deliberately loose about what follows them, so ordinary
+      // speech lands here constantly: "take a look", "identify the problem", "show me that
+      // slide". None of it is addressed to a machine.
+      if (NEVER_A_DEVICE.has(String(plan.needsDevice).toLowerCase())) return null;
+
       const number = spokenToNumber(plan.needsDevice);
       const target = number !== null ? String(number) : plan.needsDevice;
 

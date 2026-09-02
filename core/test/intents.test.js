@@ -129,6 +129,18 @@ fallsThrough('always keep an eye on the slides');
 fallsThrough('');
 fallsThrough('   ');
 
+console.log('\nOrdinary words are not device names');
+// Found live, and the worst kind of bug this system can have: "take a look at this slide",
+// said to an audience, seized a screen. Hostname matching is a substring test, so "a" found
+// "Karan's Laptop". Two rules stop it — a device name must be at least three characters,
+// and a short list of words is never a device however much a hostname contains them.
+fallsThrough('take a look at this slide');
+fallsThrough('identify a moment');
+fallsThrough('show me a second');
+fallsThrough('identify the problem');
+fallsThrough('show me that slide');
+fallsThrough('take my word for it');
+
 console.log('\nDevices that do not exist');
 // Four is a perfectly good number; there is simply no device four. Handing this to the
 // model is right — it can say so, where a takeover of nothing cannot.

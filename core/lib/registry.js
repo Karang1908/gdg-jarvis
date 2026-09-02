@@ -253,6 +253,15 @@ function resolve(input) {
   }
 
   const needle = text.toLowerCase();
+
+  // A name has to be long enough to be a name.
+  //
+  // Hostname matching is a substring test, so a single letter matched almost anything: "a"
+  // found "Karan's Laptop", and "take a look at this slide" — said to an audience, not to
+  // JARVIS — seized a screen. Three characters is short enough for "lap" to still find a
+  // laptop and long enough that stray articles do not find anything.
+  if (needle.length < 3) return { ok: false, reason: 'device_unknown' };
+
   const matches = [...devices.values()].filter(
     (device) => device.hostname && device.hostname.toLowerCase().includes(needle)
   );

@@ -466,6 +466,9 @@ async function heartbeat(device, extra = {}) {
   await refused('non-allowlisted app', '/api/command', { target: '1', action: 'open_app', args: { app: 'hacktool' } }, 'app_not_allowlisted');
   await refused('run_shell', '/api/command', { target: '1', action: 'run_shell', args: {} }, 'action_unknown');
   await refused('unknown device', '/api/identify', { target: '99' }, 'device_unknown');
+  // A single letter used to find any hostname containing it, so an aside to the audience
+  // could seize a screen. Nothing shorter than a name is a name.
+  await refused('single letter as a device', '/api/identify', { target: 'a' }, 'device_unknown');
 
   // --- the agent surface ---------------------------------------------------------------
   console.log('\nAgent surface');
