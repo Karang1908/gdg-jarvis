@@ -528,14 +528,26 @@ function threshold() {
  */
 async function calibrate() {
   if (Number(config.threshold || process.env.JARVIS_MIC_THRESHOLD) > 0) return;
-  if (!have('arecord') || !have('sox')) return;
+  if (!have('sox')) return;
 
   const sample = path.join(workDir, `calibrate-${Date.now()}.wav`);
 
-  const captured = await runCommand(
-    'arecord', ['-q', '-f', 'S16_LE', '-c', '1', '-r', '16000', '-d', '3', sample], 10_000
-  );
-  if (captured.status !== 0) return;
+  // arecord where there is one, sox's own recorder otherwise. This used to require arecord,
+  // which is ALSA and therefore Linux — so on a Mac calibration returned immediately and
+  // silently, leaving the gate at the 3% default while reporting itself uncalibrated. The
+  // symptom is a threshold far below the room, which holds the gate open and makes every
+  // utterance run to the length cap.
+  const captured = have('arecord')
+    ? await runCommand('arecord', ['-q', '-f', 'S16_LE', '-c', '1', '-r', '16000', '-d', '3', sample], 10_000)
+    : await runCommand('rec', ['-q', '-c', '1', '-r', '16000', '-b', '16', sample, 'trim', '0', '3'], 10_000);
+
+  if (captured.status !== 0) {
+    log.warn('could not measure the room; using the default trigger', {
+      via: have('arecord') ? 'arecord' : 'rec',
+      said: String(captured.stderr || '').trim().split('\n').pop().slice(0, 120),
+    });
+    return;
+  }
 
   // The quietest half-second wins, not the average.
   //
