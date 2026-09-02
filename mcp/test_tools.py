@@ -94,11 +94,16 @@ async def main() -> int:
     check("voice_status reports the provider", voice.get("ok") and "provider" in voice, json.dumps(voice)[:200])
 
     # The microphone belongs to Core, so the model can ask about it and close it. Reading
-    # the state is asserted; whether this machine has recording hardware is not the test's
-    # business, so `listening` is only required to agree with `available`.
+    # What is asserted is that it answers honestly, not what it answers: whether this
+    # machine can record is a fact about the machine. It must not be listening yet, though —
+    # nothing has opened it, and a microphone that reports itself open when nobody opened it
+    # is worse than one that cannot hear at all.
     mic = call(mod, "microphone")
     check("microphone reports its own state",
-          mic.get("ok") and mic.get("listening") == mic.get("available"), json.dumps(mic)[:200])
+          mic.get("ok")
+          and isinstance(mic.get("available"), bool)
+          and mic.get("listening") is False,
+          json.dumps(mic)[:200])
     check("microphone can be closed",
           call(mod, "microphone", on=False).get("listening") is False, json.dumps(mic)[:200])
 
