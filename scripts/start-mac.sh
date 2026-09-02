@@ -7,12 +7,19 @@
 #   scripts/start-mac.sh --local      # bind to 127.0.0.1, nothing else can reach it
 #   scripts/start-mac.sh --port 4000
 #
-# The Kali laptop in SPEC.md §4 is the access point *and* Core. Before that machine
-# exists — or when rehearsing alone — the Mac can be both Core and a node, and everything
-# except the private Wi-Fi works exactly as it will on the day.
+# This is the way it runs. Core, the microphone, the voice, the model and the MCP server all
+# live on this Mac, and teammates join over whatever Wi-Fi the room is already on.
 #
-# Teammates join the same network this Mac is on and enrol normally. The only thing
-# missing is JARVIS-NET itself.
+# SPEC.md §4 has a Kali laptop being both the access point and Core, and that still works —
+# scripts/setup-kali.sh is for it. But a machine that is also an access point is a machine
+# with a second job it can fail at, and it did: the hotspot dropped mid-demo and had to be
+# restarted by hand, and being on an island of its own meant no internet for the voice or
+# the model. Joining the room's own network removes both problems and a category of
+# debugging with them.
+#
+# What it costs is the one guarantee an access point gave for free: that devices can reach
+# each other. Plenty of venue and campus networks isolate clients, and on such a network the
+# join line will simply time out. Test it from a phone before the day — see below.
 #
 # Ctrl+C releases every screen and stops everything.
 
@@ -87,6 +94,40 @@ if ! node core/lib/settings.js --check 2>/dev/null; then
   exit 1
 fi
 ok "settings loaded from .env"
+
+# ---------------------------------------------------------------------------------------
+# Can the room reach this Mac?
+#
+# The access point used to guarantee it. Ordinary Wi-Fi does not, and the two ways it fails
+# are silent: a firewall that drops incoming connections, and a network that forbids devices
+# from talking to each other at all. Neither announces itself — the join line simply hangs,
+# which reads as the system being broken.
+#
+# The firewall can be checked from here. Client isolation cannot: proving it needs a second
+# device, so this says so rather than pretending otherwise.
+# ---------------------------------------------------------------------------------------
+
+if [ "$BIND" != "127.0.0.1" ]; then
+  FW=/usr/libexec/ApplicationFirewall/socketfilterfw
+  if [ -x "$FW" ]; then
+    if "$FW" --getblockall 2>/dev/null | grep -q "block all state set to enabled"; then
+      bad "the firewall is set to block all incoming connections"
+      warn "nobody will be able to join. System Settings > Network > Firewall"
+      exit 1
+    fi
+    if "$FW" --getglobalstate 2>/dev/null | grep -q "enabled"; then
+      # Fine in itself — node is usually allowed — but worth naming, because if joining
+      # fails this is the first thing to rule out.
+      ok "firewall on, not blocking everything"
+    else
+      ok "firewall off"
+    fi
+  fi
+
+  LAN=$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface/{print $2}')" 2>/dev/null)
+  [ -n "$LAN" ] && ok "this Mac is $LAN on the room's network" \
+                || warn "could not work out this Mac's address — is Wi-Fi connected?"
+fi
 
 ADMIN=$(node core/lib/settings.js admin)
 JOIN_SECRET=$(node core/lib/settings.js join)
@@ -219,8 +260,16 @@ if [ "$BIND" != "127.0.0.1" ]; then
   printf '\n'
   printf '  They become device 2, 3, 4 ... in the order they join.\n'
   printf '\n'
-  warn "this Mac is reachable at $BIND on your current network"
-  warn "use --local when you are not rehearsing with other people"
+  printf '  \033[1mTest this from a phone before the day.\033[0m Open the control page on one:\n'
+  printf '\n'
+  printf '    %s/control/\n' "$CORE_URL"
+  printf '\n'
+  printf '  If it loads, the room can reach this Mac and joining will work. If it hangs,\n'
+  printf '  the network is keeping its clients apart — common on campus and venue Wi-Fi —\n'
+  printf '  and no amount of fixing here will help. A phone hotspot that everyone joins,\n'
+  printf '  this Mac included, is the way round it.\n'
+  printf '\n'
+  warn "use --local when you are working alone; nothing else can reach it then"
 fi
 
 bold ""
