@@ -52,19 +52,31 @@ bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
 # Where to listen
 # ---------------------------------------------------------------------------------------
 
+# The address a phone or a teammate's laptop can reach, worked out either way so it can be
+# printed and used for the join line.
+LAN=$(ipconfig getifaddr en0 2>/dev/null)
+[ -n "$LAN" ] || LAN=$(ipconfig getifaddr en1 2>/dev/null)
+
 if [ -z "$BIND" ]; then
-  # The address a phone or a teammate's laptop can actually reach. Binding to 127.0.0.1
-  # would work perfectly on this machine and be invisible to every other one, which is a
-  # confusing way to discover the controller does not load on your phone.
-  BIND=$(ipconfig getifaddr en0 2>/dev/null)
-  [ -n "$BIND" ] || BIND=$(ipconfig getifaddr en1 2>/dev/null)
-  if [ -z "$BIND" ]; then
-    warn "no LAN address found; falling back to 127.0.0.1 (this Mac only)"
-    BIND="127.0.0.1"
+  # Everything, not just the LAN address.
+  #
+  # Binding to the LAN address alone looks right and breaks the model. The MCP server runs
+  # beside Core and reaches it at 127.0.0.1 — which, bound that way, is not listening — so
+  # every question needing the room's tools failed against a refused connection and timed
+  # out after forty-five seconds. Bind to both; advertise the one the room can use.
+  BIND="0.0.0.0"
+  if [ -z "$LAN" ]; then
+    warn "no LAN address found; nothing but this Mac will be able to reach it"
+    LAN="127.0.0.1"
   fi
 fi
 
-CORE_URL="http://$BIND:$PORT"
+# --local means this Mac only, so that is the address to advertise as well as bind.
+if [ "$BIND" = "127.0.0.1" ]; then
+  LAN="127.0.0.1"
+fi
+
+CORE_URL="http://$LAN:$PORT"
 
 # ---------------------------------------------------------------------------------------
 # Preflight
@@ -107,7 +119,7 @@ ok "settings loaded from .env"
 # device, so this says so rather than pretending otherwise.
 # ---------------------------------------------------------------------------------------
 
-if [ "$BIND" != "127.0.0.1" ]; then
+if [ "$LAN" != "127.0.0.1" ]; then
   FW=/usr/libexec/ApplicationFirewall/socketfilterfw
   if [ -x "$FW" ]; then
     if "$FW" --getblockall 2>/dev/null | grep -q "block all state set to enabled"; then
@@ -124,9 +136,7 @@ if [ "$BIND" != "127.0.0.1" ]; then
     fi
   fi
 
-  LAN=$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface/{print $2}')" 2>/dev/null)
-  [ -n "$LAN" ] && ok "this Mac is $LAN on the room's network" \
-                || warn "could not work out this Mac's address — is Wi-Fi connected?"
+  ok "this Mac is $LAN on the room's network"
 fi
 
 ADMIN=$(node core/lib/settings.js admin)
@@ -248,7 +258,7 @@ printf '  3. Tap RELEASE ALL — your desktop comes back exactly as it was.\n'
 printf '\n'
 printf '  On the overlay itself: hold Escape for a second to release just that screen.\n'
 
-if [ "$BIND" != "127.0.0.1" ]; then
+if [ "$LAN" != "127.0.0.1" ]; then
   bold ""
   bold "Adding anyone else"
   printf '\n'
