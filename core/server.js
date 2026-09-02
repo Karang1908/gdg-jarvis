@@ -1017,7 +1017,28 @@ router.post('/api/personality/reload', (req, res, context) => {
  * have to type an IP address they cannot see. Substituting here means the pasted line
  * carries only the two things that are actually theirs — node and token.
  */
-function serveAgent(res, filename) {
+/**
+ * The address this particular client can reach Core on.
+ *
+ * Taken from the request rather than worked out once at startup, because the startup answer
+ * goes stale: unplug the ethernet, join a different Wi-Fi, and the address baked into the
+ * join script points at a network nobody is on any more. Whoever just fetched this page
+ * demonstrably reached Core somehow, and the Host header says how — which is also the right
+ * answer on a machine with several addresses, where "the" address is not a thing.
+ *
+ * Falls back to the startup origin for a client that sends no Host, which in practice means
+ * something ancient or something hand-rolled.
+ */
+function reachableOrigin(req) {
+  const host = req && req.headers && req.headers.host;
+  // Anything but a hostname and port is not something to paste into a script.
+  if (typeof host === 'string' && /^[A-Za-z0-9._-]+(:\d+)?$/.test(host)) {
+    return `http://${host}`;
+  }
+  return origin;
+}
+
+function serveAgent(req, res, filename) {
   let source;
   try {
     source = fsp.readFileSync(path.join(AGENT_DIR, filename), 'utf8');
@@ -1034,13 +1055,13 @@ function serveAgent(res, filename) {
   // this can enroll, which is exactly the model — see DEVIATIONS.md D8.
   res.end(
     source
-      .split('@@CORE_URL@@').join(origin)
+      .split('@@CORE_URL@@').join(reachableOrigin(req))
       .split('@@JOIN_SECRET@@').join(auth.joinSecret())
   );
 }
 
-router.get('/join', (req, res) => serveAgent(res, 'jarvis-agent.sh'));
-router.get('/join.ps1', (req, res) => serveAgent(res, 'jarvis-agent.ps1'));
+router.get('/join', (req, res) => serveAgent(req, res, 'jarvis-agent.sh'));
+router.get('/join.ps1', (req, res) => serveAgent(req, res, 'jarvis-agent.ps1'));
 
 // --- Static UI -------------------------------------------------------------------------
 

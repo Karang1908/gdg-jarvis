@@ -488,6 +488,15 @@ async function heartbeat(device, extra = {}) {
 
   called.add('GET /join');
   const join = await (await fetch(`${BASE}/join`)).text();
+  // The address in the script is the one the client used, not the one Core worked out at
+  // startup. Switch networks — unplug the ethernet, join a different Wi-Fi — and the
+  // startup answer points at a network nobody is on, while the Host header cannot be wrong:
+  // whoever just fetched it demonstrably reached Core that way.
+  const viaLoopback = await (await fetch(`${BASE}/join`)).text();
+  check('the join script targets the address it was fetched from',
+    viaLoopback.includes(`http://127.0.0.1:${PORT}`),
+    (viaLoopback.match(/CORE_DEFAULT="[^"]*"/) || ['no CORE_DEFAULT'])[0]);
+
   check('/join carries the secret', join.includes(JOIN));
   called.add('GET /join.ps1');
   check('/join.ps1 carries the secret', (await (await fetch(`${BASE}/join.ps1`)).text()).includes(JOIN));
