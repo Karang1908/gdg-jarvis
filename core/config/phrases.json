@@ -15,7 +15,8 @@
     "At once, sir.",
     "Standing by.",
     "That device is not responding.",
-    "The room is yours."
+    "The room is yours.",
+    "We are here for GDG Essentials!"
   ],
   "_counts": "Spoken answers to 'how many systems are online'. These must match core/server.js exactly, word for word — a digit where this says a word is a cache miss on every ask. core/test/phrases.test.js enforces that.",
   "counts": [

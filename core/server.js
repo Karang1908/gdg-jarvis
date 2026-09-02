@@ -671,6 +671,9 @@ const ACKNOWLEDGEMENT = 'One moment, sir.';
 /** The answer to "are you there". Warmed, so it is instant. */
 const PRESENT = 'Yes, sir.';
 
+/** The set-piece. Warmed, because a beat of silence would take all the air out of it. */
+const WHY_WE_ARE_HERE = 'We are here for GDG Essentials!';
+
 /**
  * How long the model gets before JARVIS admits it is thinking.
  *
@@ -715,16 +718,24 @@ async function handleUtterance(text, source) {
   const status = intent ? 'command' : addressed ? 'thinking' : 'ignored';
   observers.broadcast('heard', { text: heard, at: Date.now(), source, status });
 
-  // A fixed command does not open the window.
+  // A command closes the conversation; a question continues it.
   //
-  // "Take the room" is fire and forget — the presenter says it and goes straight back to
-  // talking to the audience, and treating the next half minute of that as conversation
-  // would put every sentence of it through the model. That is the exact thing the wake word
-  // exists to prevent. Only a question opens a conversation, because only a question is one.
-  if (intent) conversationUntil = 0;
+  // "Take the room" is fire and forget — said on the way back to addressing the audience,
+  // and treating the next half minute of that as conversation would put every sentence of
+  // it through the model, which is the exact thing the wake word prevents.
+  //
+  // But "are you there", "why are we here" and "how many are online" are questions, and a
+  // question invites another one. Answering them and then ignoring the follow-up because
+  // the name was not repeated is the thing that feels broken.
+  if (intent) conversationUntil = intent.answer ? Date.now() + FOLLOW_UP_MS : 0;
 
   if (intent) {
     // Answered from a warmed line, so it lands while the question is still in the air.
+    if (intent.answer === 'why') {
+      commands.speakAsJarvis(WHY_WE_ARE_HERE, { source });
+      return { ok: true, matched: intent.name, spoken: WHY_WE_ARE_HERE };
+    }
+
     if (intent.answer === 'presence') {
       commands.speakAsJarvis(PRESENT, { source });
       return { ok: true, matched: intent.name, spoken: PRESENT };

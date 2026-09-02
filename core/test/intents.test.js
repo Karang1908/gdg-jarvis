@@ -140,12 +140,35 @@ fallsThrough('show me a second');
 fallsThrough('identify the problem');
 fallsThrough('show me that slide');
 fallsThrough('take my word for it');
+// The discourse markers must not become a way in for ordinary speech.
+fallsThrough('now let me show you the next slide');
+fallsThrough('and this is where it gets interesting');
+fallsThrough('so anyway the network is the interesting part');
+fallsThrough('right, moving on to the next section');
 
 console.log('\nDevices that do not exist');
 // Four is a perfectly good number; there is simply no device four. Handing this to the
 // model is right — it can say so, where a takeover of nothing cannot.
 fallsThrough('jarvis take device four');
 fallsThrough('jarvis identify seven');
+
+console.log('\nThe way people actually speak');
+// Nobody starts a sentence at the sentence. Anchoring at the literal first word meant seven
+// of eight natural phrasings did nothing — which is what "sometimes it just ignores me" was.
+matches('okay jarvis take the room', 'takeover_all');
+matches('so jarvis, show me the architecture', 'scene', { scene: 'network' });
+matches('right, take the room', 'takeover_all');
+matches('um jarvis are you there', 'presence');
+matches('alright jarvis identify two', 'identify', { target: '2' });
+matches('and jarvis how many are online', 'count');
+matches('well take the room', 'takeover_all');
+matches('now show me the architecture', 'scene', { scene: 'network' });
+
+console.log('\nWhy are we here');
+matches('why are we here', 'why');
+matches('jarvis why are we here', 'why');
+matches('JARVIS. Why are we all here?', 'why');
+matches('what are we doing here', 'why');
 
 console.log('\nAre you there');
 // The one question that must never be slow. Answered from a warmed line before the sentence

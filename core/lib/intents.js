@@ -14,7 +14,21 @@
  */
 
 /** Optional address, so every command works with or without the name. */
-const WAKE = '^(?:hey\\s+|ok(?:ay)?\\s+)?(?:(?:jarvis|jarvas|jervis|javis|always)[,.!\\s]*)?';
+/**
+ * The noises people make before they say the thing.
+ *
+ * Nobody starts a sentence at the sentence. "So, Jarvis, show me the architecture" and
+ * "right, take the room" are how this is actually spoken, and anchoring at the literal first
+ * word meant seven of eight natural phrasings did nothing at all — which is what "sometimes
+ * it just ignores me" turns out to be.
+ *
+ * Only discourse markers, and only a few: these words carry no meaning of their own, so
+ * skipping them cannot change what a sentence means. "The" is deliberately not here — "the
+ * jarvis core runs on kali" must stay ordinary speech.
+ */
+const LEAD = '(?:(?:um|uh|er|so|okay|ok|right|alright|now|and|well|hey|please)[,.!\\s]+){0,3}';
+
+const WAKE = '^' + LEAD + '(?:(?:jarvis|jarvas|jervis|javis|always)[,.!\\s]*)?';
 
 /**
  * Spoken numbers, including the homophones a recogniser actually returns.
@@ -122,6 +136,18 @@ const INTENTS = [
     test: new RegExp(WAKE + '(?:reactor|cascade|arc)\\s*(?:sequence|reactor)?'),
     say: 'Reactor sequence engaged.',
     plan: () => ({ route: '/api/cascade', body: { effect: 'arc_reactor' }, label: 'CASCADE' }),
+  },
+  {
+    /**
+     * "Why are we here?"
+     *
+     * A set-piece, so it is answered like one — instantly, from a warmed line, with none of
+     * the model's hedging. Asked on stage it wants to land, and five seconds of silence
+     * followed by a paragraph about IoT is not landing.
+     */
+    name: 'why',
+    test: new RegExp(WAKE + '(?:why\\s+(?:are|r)\\s+(?:we|you|us)\\s+(?:all\\s+)?here|what\\s+are\\s+we\\s+(?:all\\s+)?doing\\s+here|why\\s+this)'),
+    plan: () => ({ route: null, label: 'WHY', answer: 'why' }),
   },
   {
     /**
@@ -250,7 +276,7 @@ const NAMES = 'jarvis|jarvas|jervis|javis|jarviss|darvis|always';
  * with the name ("JARVIS runs on the Kali machine") does reach the model. Nothing short of
  * push-to-talk closes that, and the fixed commands do not depend on this gate at all.
  */
-const ADDRESS = new RegExp(`^(?:hey\\s+|ok(?:ay)?\\s+)?(?:${NAMES})\\b`, 'i');
+const ADDRESS = new RegExp(`^${LEAD}(?:${NAMES})\\b`, 'i');
 
 function addressed(transcript) {
   return ADDRESS.test(String(transcript || '').trim().replace(/^[,.\s]+/, ''));

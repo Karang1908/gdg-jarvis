@@ -428,6 +428,11 @@ async function heartbeat(device, extra = {}) {
   // The gate. The microphone stays open while the presenter talks to a room, so speech that
   // is not addressed to JARVIS must not become a model call — each one takes twelve seconds
   // or more, can reach for the room's tools, and speaks its answer over the presenter.
+  // A room command closes any conversation the earlier questions opened — which is the
+  // state the presenter is in for most of the demo: last thing said was an instruction,
+  // and everything after it is talk to the audience.
+  await api('POST', '/api/utterance', { text: 'take the room' });
+
   const aside = await api('POST', '/api/utterance', { text: 'so anyway MQTT is a lightweight protocol' });
   check('speech not addressed to JARVIS never reaches the model',
     aside.data.ignored === true && aside.data.reason === 'not_addressed' && !aside.data.viaModel,
