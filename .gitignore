@@ -36,3 +36,9 @@ node_modules/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Speech models, fetched on first run. 74MB and machine-specific.
+core/config/whisper/
+
+# Piper voices, downloaded per machine.
+core/config/piper/
