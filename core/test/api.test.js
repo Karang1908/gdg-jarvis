@@ -362,6 +362,16 @@ async function heartbeat(device, extra = {}) {
   check('unmute', (await api('POST', '/api/mute', { target: 'ALL', muted: false })).data.ok === true);
   check('set the wall to device 2', (await api('POST', '/api/wall', { device: '2' })).data.wall === 2);
 
+  // Somebody has to be the wall. It used to be claimed only by an agent started with
+  // --wall, so a room where nobody passed the flag had none at all — the scenes that
+  // address it went nowhere and nothing said why. Which device holds it is not the point
+  // here; this suite enrols one with the flag deliberately, and an explicit claim wins.
+  const room = await api('GET', '/api/devices');
+  const holder = (room.data.devices || []).filter((d) => d.isWall);
+  check('the room always has a wall, and only one',
+    holder.length === 1,
+    JSON.stringify((room.data.devices || []).map((d) => [d.number, d.isWall])));
+
   const renumber = await api('POST', '/api/renumber', { device: '3', to: 1 });
   check('renumber swaps 3 and 1', renumber.data.ok === true && renumber.data.swappedWith,
     JSON.stringify(renumber.data));

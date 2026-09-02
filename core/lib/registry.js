@@ -151,7 +151,15 @@ function enroll(meta) {
   device.sessionId = crypto.randomBytes(12).toString('hex');
   device.lastError = null;
 
-  if (meta.wantsWall) claimWall(number);
+  // Somebody has to be the wall.
+  //
+  // It used to be claimed only by an agent started with --wall, which meant a room where
+  // nobody passed the flag had no wall at all: the scenes that address it went nowhere and
+  // nothing said why. The first machine to join takes it if no one holds it, which is what
+  // everybody assumes anyway — the first screen in the room is the screen you look at.
+  //
+  // An explicit --wall still wins, whenever it arrives.
+  if (meta.wantsWall || !wallDevice()) claimWall(number);
 
   return device;
 }
