@@ -40,15 +40,26 @@ const MAX_UTTERANCE_S = 8;
 /**
  * Silence that ends an utterance.
  *
- * Paid on every single thing anyone says, command or question, so it is the largest fixed
- * cost on the fast path — a spoken command is about two seconds end to end and this is most
- * of the part that is not the recogniser.
+ * By far the largest thing between finishing a sentence and the room reacting. Measured on
+ * the demo machine, everything after the speaker stops:
  *
- * 0.8s rather than 1.2s. Short enough to feel prompt, long enough to survive the pause
- * somebody takes in the middle of "identify... device two". Below about 0.6s it starts
- * cutting people off mid-sentence, which costs far more than it saves.
+ *   waiting for this silence   500ms
+ *   transcribing               210ms   (tiny.en, resident, flat with clip length)
+ *   matching and dispatching    10ms
+ *
+ * So the recogniser is not what makes it feel slow, and a faster model would buy almost
+ * nothing. This is the number that matters.
+ *
+ * Half a second: quick enough to feel like an answer rather than a wait, and still longer
+ * than the gaps inside a spoken sentence. It was 0.8s, which was 77% of the total. Below
+ * about 0.35s it starts ending sentences in the middle of them, which costs far more than
+ * it saves — a command cut in half does nothing at all.
+ *
+ * JARVIS_MIC_SILENCE_S for a room that needs more patience.
  */
-const SILENCE_S = 0.8;
+const SILENCE_S = Number(process.env.JARVIS_MIC_SILENCE_S) > 0
+  ? Number(process.env.JARVIS_MIC_SILENCE_S)
+  : 0.5;
 
 let config = {};
 let capture = null;
