@@ -56,20 +56,25 @@ else
   # spare port and a throwaway .env, so a running demo is never disturbed.
   PORT=3878
   ENVFILE=$(mktemp)
+  # A scratch memory file. Without one the `remember` tool writes into the operator's own
+  # notes, and JARVIS then believes "integration test note" is a fact about the room.
+  MEMFILE=$(mktemp)
+  printf '# Test memory\n' > "$MEMFILE"
   cat > "$ENVFILE" <<ENV
 JARVIS_ADMIN_PASSWORD=test-admin-password
 JARVIS_JOIN_SECRET=test-join-secret
 JARVIS_WIFI_PASSWORD=test-passphrase
-JARVIS_VOICE_PROVIDER=espeak
 ENV
 
-  node core/server.js --host 127.0.0.1 --port "$PORT" --env "$ENVFILE" >/dev/null 2>&1 &
+  # No voice provider pinned: forcing espeak meant the suite only passed on machines that
+  # happened to have espeak. Whatever local voice exists is the right one to exercise.
+  node core/server.js --host 127.0.0.1 --port "$PORT" --env "$ENVFILE" --memory "$MEMFILE" >/dev/null 2>&1 &
   CORE_PID=$!
 
   cleanup() {
     kill "$CORE_PID" 2>/dev/null
     pkill -f "sim-node.sh .* --server http://127.0.0.1:$PORT" 2>/dev/null
-    rm -f "$ENVFILE"
+    rm -f "$ENVFILE" "$MEMFILE"
   }
   trap cleanup EXIT
 
