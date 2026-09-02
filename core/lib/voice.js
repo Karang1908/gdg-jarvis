@@ -633,6 +633,35 @@ function isSpeaking() {
   return Date.now() < speakingUntil;
 }
 
+/**
+ * How long a clip may take to play before something is wrong.
+ *
+ * Its own duration plus room for a slow start. A flat allowance killed anything longer than
+ * it, mid-word, and reported a timeout for audio that was playing perfectly well. The guard
+ * still stops a wedged player hanging forever — it just asks the file how long it is first.
+ *
+ * Read from the WAV header, where the byte rate lives at offset 28, falling back to the flat
+ * allowance for anything that cannot be read: a wrong guess here cuts speech off.
+ */
+function playbackAllowance(file) {
+  try {
+    const header = Buffer.alloc(44);
+    const handle = fs.openSync(file, 'r');
+    fs.readSync(handle, header, 0, 44, 0);
+    fs.closeSync(handle);
+
+    if (header.toString('ascii', 0, 4) !== 'RIFF') return SPEECH_TIMEOUT_MS;
+
+    const byteRate = header.readUInt32LE(28);
+    if (!byteRate) return SPEECH_TIMEOUT_MS;
+
+    const seconds = (fs.statSync(file).size - 44) / byteRate;
+    return Math.max(SPEECH_TIMEOUT_MS, Math.ceil(seconds * 1000) + 5_000);
+  } catch {
+    return SPEECH_TIMEOUT_MS;
+  }
+}
+
 function play(file, startedAt) {
   return new Promise((resolve) => {
     const spawnedAt = Date.now();
@@ -669,7 +698,7 @@ function play(file, startedAt) {
         /* gone */
       }
       done({ ok: false, error: 'playback_timeout' });
-    }, SPEECH_TIMEOUT_MS);
+    }, playbackAllowance(file));
     guard.unref();
 
     child.on('error', (err) => done({ ok: false, error: err.message }));
