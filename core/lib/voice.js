@@ -644,6 +644,19 @@ function isSpeaking() {
 }
 
 /**
+ * Was JARVIS talking at any point since the given moment?
+ *
+ * The question a recording needs answered, and not the same as "is it talking now". A
+ * capture runs for seconds: JARVIS speaks into the middle of it and has finished well
+ * before it ends, so asking at the end says no and its own voice goes off to be
+ * transcribed — and then acted on. Asking whether speech ended after the recording began
+ * catches the overlap however brief it was.
+ */
+function spokeSince(moment) {
+  return speakingUntil > moment;
+}
+
+/**
  * How long a clip may take to play before something is wrong.
  *
  * Its own duration plus room for a slow start. A flat allowance killed anything longer than
@@ -987,6 +1000,7 @@ module.exports = {
   init,
   speak,
   isSpeaking,
+  spokeSince,
   synthesise,
   silence,
   describe,

@@ -34,14 +34,24 @@ trap cleanup EXIT
 
 bold "1. Recording"
 
-if ! command -v arecord >/dev/null 2>&1; then
-  bad "no arecord — install alsa-utils"
+# arecord on Linux, sox everywhere else. This used to require arecord, which is ALSA and so
+# does not exist on a Mac — where the whole system now runs.
+if command -v arecord >/dev/null 2>&1; then
+  RECORD_WITH=arecord
+elif command -v rec >/dev/null 2>&1; then
+  RECORD_WITH=rec
+else
+  bad "nothing here can record — install sox"
   exit 1
 fi
 
 printf '  say something for %s seconds, starting now...\n' "$SECONDS_TO_RECORD"
 sleep 1
-arecord -q -f S16_LE -c1 -r16000 -d "$SECONDS_TO_RECORD" "$CLIP" 2>/dev/null
+if [ "$RECORD_WITH" = arecord ]; then
+  arecord -q -f S16_LE -c1 -r16000 -d "$SECONDS_TO_RECORD" "$CLIP" 2>/dev/null
+else
+  rec -q -c1 -r16000 -b16 "$CLIP" trim 0 "$SECONDS_TO_RECORD" 2>/dev/null
+fi
 
 BYTES=$(stat -c%s "$CLIP" 2>/dev/null || stat -f%z "$CLIP" 2>/dev/null || echo 0)
 if [ "$BYTES" -lt 1000 ]; then
@@ -78,8 +88,12 @@ HOT=$(awk -v p="${PEAK:-0}" 'BEGIN{print (p > 0.99) ? 1 : 0}')
 
 if [ "$QUIET" = "1" ]; then
   bad "far too quiet — Core will never notice you started speaking"
-  warn "  pactl set-source-volume @DEFAULT_SOURCE@ 60%"
-  warn "  amixer -c 0 sset 'Internal Mic Boost' 2"
+  if [ "$(uname)" = "Darwin" ]; then
+    warn "  osascript -e 'set volume input volume 90'"
+  else
+    warn "  pactl set-source-volume @DEFAULT_SOURCE@ 60%"
+    warn "  amixer -c 0 sset 'Internal Mic Boost' 2"
+  fi
 elif [ "$HOT" = "1" ]; then
   warn "clipping — turn it down or the recogniser hears distortion"
   warn "  pactl set-source-volume @DEFAULT_SOURCE@ 40%"
@@ -89,12 +103,13 @@ fi
 
 bold "4. Does it sound like you?"
 
-if command -v aplay >/dev/null 2>&1; then
+PLAY_WITH=$(command -v aplay || command -v afplay || command -v play || true)
+if [ -n "$PLAY_WITH" ]; then
   printf '  playing it back...\n'
-  aplay -q "$CLIP" 2>/dev/null
+  "$PLAY_WITH" "$CLIP" >/dev/null 2>&1
   ok "if that was your voice, the microphone is fine"
 else
-  warn "no aplay, skipping playback"
+  warn "nothing here can play audio, skipping playback"
 fi
 
 bold "5. Can the recogniser read it?"

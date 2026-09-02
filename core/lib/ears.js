@@ -53,7 +53,7 @@ const SILENCE_S = 0.8;
 let config = {};
 let capture = null;
 /** Asked before acting on a transcript: was JARVIS talking while this was recorded? */
-let isSelf = () => false;
+let spokeSince = () => false;
 let transcriber = null;
 let listening = false;
 /** Finishing the sentence that was already in progress when the microphone was closed. */
@@ -530,7 +530,18 @@ function startAt() {
  * gaps inside a sentence without waiting through the pause at the end of one.
  */
 function stopAt() {
-  return Math.max(MIN_STOP, startAt() / 2);
+  // Above the room, always.
+  //
+  // Half of the start threshold is the right shape but not a safe floor on its own: turn
+  // the input up and the room comes up with it, and a stop threshold underneath the noise
+  // is one the level never reaches — so the gate never closes, every utterance runs to the
+  // length cap, and a two-second command takes eight seconds to come back. Measured: an
+  // input gain change took the floor to 0.93% while stopping was pinned at 0.5%.
+  //
+  // Kept clear of the start threshold too, or the hysteresis disappears again.
+  const aboveTheRoom = measuredFloor() * 1.5;
+  const halfOfStart = startAt() / 2;
+  return Math.min(startAt() * 0.8, Math.max(MIN_STOP, aboveTheRoom, halfOfStart));
 }
 
 const asPercent = (value) => `${Number(value.toFixed(1))}%`;
@@ -686,7 +697,7 @@ function findText(payload) {
 
 function init(options = {}) {
   config = options || {};
-  if (typeof options.isSpeaking === 'function') isSelf = options.isSpeaking;
+  if (typeof options.spokeSince === 'function') spokeSince = options.spokeSince;
 
   workDir = path.join(os.tmpdir(), 'jarvis-ears');
   try {
@@ -854,6 +865,7 @@ function tidy(text) {
 
 async function loop() {
   while (listening || draining) {
+    const recordingStartedAt = Date.now();
     const recorded = await recordOnce();
 
     // Whatever this pass captured is finished properly even if the microphone has since
@@ -879,9 +891,13 @@ async function loop() {
       continue;
     }
 
-    // Noted before transcription, which takes long enough that JARVIS may have started
-    // and finished speaking in the meantime.
-    const spokeWhileRecording = isSelf();
+    // Did JARVIS talk over any part of this recording?
+    //
+    // Asked about the whole span, not the instant the recording ended. A capture runs for
+    // seconds; JARVIS speaks into the middle of one and is finished before it stops, so
+    // asking at the end answers no and its own voice goes off to be transcribed and acted
+    // on. That is how it started responding to itself.
+    const spokeWhileRecording = spokeSince(recordingStartedAt);
 
     let text = '';
     try {

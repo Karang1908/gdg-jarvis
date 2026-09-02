@@ -124,6 +124,7 @@ async function main() {
 
   fs.unlinkSync(sample);
 
+  await ignoresItself();
   await residentServer();
   await responsiveness();
   await finishesTheSentence();
@@ -334,6 +335,59 @@ async function finishesTheSentence() {
   await new Promise((r) => setTimeout(r, 2500));
   check('and nothing further is picked up once it has drained',
     heard.length === seen, `grew from ${seen} to ${heard.length} after stopping`);
+
+  process.env.PATH = originalPath;
+  fs.rmSync(bin, { recursive: true, force: true });
+}
+
+/**
+ * JARVIS must not act on its own voice.
+ *
+ * The microphone is in the same room as the speakers. What made this subtle is that it used
+ * to ask "is JARVIS speaking?" at the instant the recording ended — and a recording runs for
+ * seconds, so JARVIS spoke into the middle of one and was finished before it stopped. The
+ * answer was no, and its own words went off to be transcribed and acted on.
+ */
+async function ignoresItself() {
+  console.log('\nIts own voice');
+
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-self-'));
+  // One long capture, ended by stop(), so exactly one transcript is judged. A second
+  // capture would legitimately not be suppressed — JARVIS is not talking during it — and
+  // would say nothing about whether the first was caught.
+  fs.writeFileSync(path.join(bin, 'rec'),
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) out="$a";; esac; done\n' +
+    'head -c 64000 /dev/zero > "$out"\nsleep 30\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'whisper'),
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *.wav) s="$a";; esac; done\n' +
+    'echo "releasing the room" > "${s%.wav}.txt"\nexit 0\n', { mode: 0o755 });
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  process.env.JARVIS_WHISPER_SERVER = 'off';
+
+  // Speech that begins and ends inside a recording, exactly as it does in the room.
+  let speakingUntil = 0;
+  const ready = ears.init({ spokeSince: (moment) => speakingUntil > moment });
+  if (!ready.available) {
+    console.log('  · skipped — could not stage stub binaries');
+    process.env.PATH = originalPath;
+    return;
+  }
+
+  const actedOn = [];
+  ears.start(async (text) => { actedOn.push(text); });
+
+  // JARVIS speaks a moment in and is finished long before the capture ends — the exact
+  // shape that defeated asking "is it speaking?" at the end.
+  setTimeout(() => { speakingUntil = Date.now() + 300 + 600; }, 200);
+  await new Promise((r) => setTimeout(r, 2000));
+  ears.stop();
+  await new Promise((r) => setTimeout(r, 1500));
+
+  check('a transcript recorded while JARVIS was talking is not acted on',
+    actedOn.length === 0,
+    `acted on ${actedOn.length}: ${JSON.stringify(actedOn.slice(0, 2))}`);
 
   process.env.PATH = originalPath;
   fs.rmSync(bin, { recursive: true, force: true });

@@ -147,7 +147,7 @@ try {
   ask.warm().catch(() => {});
   // The microphone is in the same room as the speakers, so ears has to be able to tell
   // JARVIS's own voice from somebody talking to it.
-  ears.init({ ...(config.ears || {}), isSpeaking: voice.isSpeaking });
+  ears.init({ ...(config.ears || {}), spokeSince: voice.spokeSince });
 
   choreography.init(require(options.layout));
   registry.reset();
