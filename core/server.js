@@ -18,6 +18,7 @@
 const fsp = require('fs');
 const http = require('http');
 const os = require('os');
+const { spawnSync } = require('child_process');
 const path = require('path');
 
 const ask = require('./lib/ask');
@@ -155,20 +156,96 @@ try {
   process.exit(1);
 }
 
-/** Address a node should use to reach Core, used when building overlay URLs. */
+/**
+ * Interfaces that exist but lead nowhere a teammate can follow.
+ *
+ * A VPN tunnel, a Thunderbolt bridge, Docker, AirDrop's own radio. Every one of them has a
+ * perfectly good IPv4 address, and advertising any of them hands the room a join link that
+ * cannot be reached from the room.
+ */
+const NOT_THE_NETWORK = /^(utun|awdl|llw|bridge|vmnet|docker|veth|tun|tap|vboxnet|zt|anpi|ap\d)/;
+
+/**
+ * The address a teammate should use to reach Core.
+ *
+ * This used to take the first non-loopback IPv4 it found, which was safe only because on
+ * the access point there was exactly one. On an ordinary machine on ordinary Wi-Fi there
+ * are several, and picking the wrong one prints a join line nobody can use — which looks
+ * like the network being broken rather than the wrong address being advertised.
+ *
+ * So the interface carrying the default route is asked for by name first. That is the one
+ * the rest of the network is actually reached through, by definition.
+ */
 function advertisedOrigin() {
   if (options.host !== '0.0.0.0' && options.host !== '::') {
     return `http://${options.host}:${options.port}`;
   }
-  // Bound to everything, so pick the first non-loopback IPv4 — on Kali that is the AP.
-  for (const interfaces of Object.values(os.networkInterfaces())) {
+
+  const addresses = [];
+  for (const [name, interfaces] of Object.entries(os.networkInterfaces())) {
     for (const entry of interfaces || []) {
-      if (entry.family === 'IPv4' && !entry.internal) {
-        return `http://${entry.address}:${options.port}`;
-      }
+      if (entry.family === 'IPv4' && !entry.internal) addresses.push({ name, address: entry.address });
     }
   }
-  return `http://127.0.0.1:${options.port}`;
+
+  if (!addresses.length) return `http://127.0.0.1:${options.port}`;
+
+  const viaDefaultRoute = defaultRouteInterface();
+  const preferred =
+    addresses.find((entry) => entry.name === viaDefaultRoute) ||
+    addresses.find((entry) => !NOT_THE_NETWORK.test(entry.name)) ||
+    addresses[0];
+
+  return `http://${preferred.address}:${options.port}`;
+}
+
+/**
+ * Which interface the machine reaches everything else through.
+ *
+ * Asked of the operating system rather than guessed, because the answer is exact and the
+ * guess is not. Costs one process at startup and nothing afterwards; an empty answer simply
+ * falls back to the ranking above.
+ */
+/**
+ * Which network this machine is on, according to the machine.
+ *
+ * Nothing depends on the answer; it is printed so whoever is setting up can see at a glance
+ * that Core is on the network they think it is, which is the first thing to check when a
+ * teammate cannot reach it.
+ */
+function currentNetwork() {
+  if (process.platform === 'darwin') {
+    // ipconfig first: recent macOS refuses the SSID to `networksetup` without location
+    // permission, and answers "not associated with an AirPort network" while plainly being
+    // on one. This route still tells the truth.
+    const iface = defaultRouteInterface() || 'en0';
+    const summary = spawnSync('ipconfig', ['getsummary', iface], { encoding: 'utf8', timeout: 2000 });
+    const ssid = / SSID : (.+)/.exec(String(summary.stdout || ''));
+    if (ssid) return ssid[1].trim();
+
+    const wifi = spawnSync('networksetup', ['-getairportnetwork', iface], { encoding: 'utf8', timeout: 2000 });
+    const found = /Current Wi-Fi Network:\s*(.+)/.exec(String(wifi.stdout || ''));
+    if (found) return found[1].trim();
+  } else {
+    const active = spawnSync('nmcli', ['-t', '-f', 'ACTIVE,SSID', 'device', 'wifi'], { encoding: 'utf8', timeout: 2000 });
+    const line = String(active.stdout || '').split('\n').find((row) => row.startsWith('yes:'));
+    if (line) return line.slice(4);
+  }
+  return 'wired, or not on Wi-Fi';
+}
+
+function defaultRouteInterface() {
+  const attempts = process.platform === 'darwin'
+    ? [['route', ['-n', 'get', 'default']]]
+    : [['ip', ['route', 'get', '1.1.1.1']], ['ip', ['route', 'show', 'default']]];
+
+  for (const [command, args] of attempts) {
+    const result = spawnSync(command, args, { encoding: 'utf8', timeout: 2000 });
+    if (result.status !== 0) continue;
+    const found = /(?:interface:|\bdev)\s+(\S+)/.exec(String(result.stdout || ''));
+    if (found) return found[1];
+  }
+  return null;
 }
 
 const origin = advertisedOrigin();
@@ -908,17 +985,20 @@ router.post('/api/remember', async (req, res, context) => {
  * of the conversation Core keeps open — so a personality reloaded into Core but not into
  * agy changes nothing the model does, which looks exactly like the edit having no effect.
  */
-router.post('/api/personality/reload', async (req, res, context) => {
+router.post('/api/personality/reload', (req, res, context) => {
   if (!requireAdmin(req, res, context)) return;
 
   const loaded = personality.load(options.personality, options.memory);
   ask.init({ cwd: path.join(__dirname, '..'), instructions: personality.get().body });
 
-  // A fresh conversation, because the old one still has the old personality in its context.
+  // A fresh conversation, because the old one still carries the old personality in its
+  // context. Started but not waited for: re-priming means a restart and a turn, some six
+  // seconds, and the caller asked to reload a file — not to sit through that. The model
+  // catches up a moment later, and until it does the fixed commands are unaffected.
   ask.stop();
-  const warmed = await ask.warm();
+  ask.warm().catch(() => {});
 
-  json(res, 200, { ok: true, ...loaded, model: warmed.ok ? 'reprimed' : (warmed.error || 'not_repriming') });
+  json(res, 200, { ok: true, ...loaded, model: 'repriming' });
 });
 
 // --- Enrollment (§7) -----------------------------------------------------------------
@@ -997,14 +1077,15 @@ server.headersTimeout = 0;
 server.requestTimeout = 0;
 
 server.listen(options.port, options.host, () => {
-  const network = auth.wifi();
-
   console.log('');
   console.log('    J.A.R.V.I.S.  CORE');
   console.log('');
   console.log(`    listening   ${options.host}:${options.port}`);
   console.log(`    origin      ${origin}`);
-  console.log(`    network     ${network.ssid}`);
+  // The network Core is actually on, asked of the machine. It used to print the SSID from
+  // .env, which was the network Core intended to create back when Core created one — and
+  // on a machine simply joining the room's Wi-Fi that was a confident, wrong answer.
+  console.log(`    network     ${currentNetwork()}`);
   console.log(`    apps        ${validate.appNames().join('  ')}`);
   console.log('');
   console.log(`    wall        ${origin}/wall/`);
@@ -1019,7 +1100,9 @@ server.listen(options.port, options.host, () => {
   console.log('');
 
   if (options.host === '0.0.0.0') {
-    log.warn('bound to all interfaces; pass --host <AP address> to restrict to JARVIS-NET');
+    log.info('reachable on every network this machine is on', {
+      restrict_with: `--host ${origin.replace('http://', '').split(':')[0]}`,
+    });
   }
 });
 
