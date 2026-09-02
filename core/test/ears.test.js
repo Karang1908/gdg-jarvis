@@ -169,6 +169,9 @@ async function responsiveness() {
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${bin}:${originalPath}`;
+  // These stubs are the command-line whisper. On a machine that also has the resident one
+  // installed, init would pick that instead and the stubs would never run.
+  process.env.JARVIS_WHISPER_SERVER = 'off';
 
   const ready = ears.init({});
   if (!ready.available) {
@@ -302,7 +305,7 @@ async function finishesTheSentence() {
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${bin}:${originalPath}`;
-  delete process.env.JARVIS_WHISPER_SERVER;
+  process.env.JARVIS_WHISPER_SERVER = 'off';
 
   const ready = ears.init({});
   if (!ready.available) {
