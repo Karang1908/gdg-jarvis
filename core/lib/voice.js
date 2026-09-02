@@ -389,10 +389,20 @@ function findAudio(payload) {
  * rather than replaying yesterday's delivery — the failure would be editing the style
  * prompt, hearing no difference, and concluding the setting does nothing.
  */
+/**
+ * What makes two renderings of the same words different.
+ *
+ * The provider has to be the one that actually spoke, not the one that was asked for. It
+ * used to be `config.provider`, which is the preference — and the preference is normally
+ * "auto". So a line rendered by the fallback voice while no API key was set was filed under
+ * exactly the same key as the same line from Gemini, and once a key was added the old
+ * fallback recording was served in its place: the right words, the wrong voice, and on this
+ * machine an audibly distorted one.
+ */
 function cacheKey(text) {
   const settings = config.gemini || {};
   const material = [
-    config.provider || 'auto',
+    chain[0] || config.provider || 'auto',
     settings.voice || '',
     settings.model || '',
     config.style || '',
