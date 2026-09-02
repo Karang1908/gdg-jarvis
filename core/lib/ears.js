@@ -320,6 +320,7 @@ let serverOrigin = '';
 
 /** Where the resident transcriber is, if there is one. */
 function serverUrl() {
+  if (process.env.JARVIS_WHISPER_SERVER === 'off') return '';
   return process.env.JARVIS_WHISPER_SERVER || serverOrigin || '';
 }
 
@@ -330,6 +331,11 @@ function serverUrl() {
  * pointing at one they run themselves, so nothing is started here.
  */
 function startServer() {
+  // An explicit "off" keeps the resident transcriber out of the way — for a machine where
+  // it misbehaves, and for tests that need to exercise the command-line path deliberately
+  // rather than whichever path happens to be installed.
+  if (process.env.JARVIS_WHISPER_SERVER === 'off') return;
+
   if (process.env.JARVIS_WHISPER_SERVER) {
     log.info('using the whisper server you configured', { url: process.env.JARVIS_WHISPER_SERVER });
     return;
