@@ -265,11 +265,11 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
 
 ```
    PHONE  /control/          the remote. no microphone, no recognition.
-     │                       its mic button toggles the microphone on Kali.
+     │                       its mic button toggles the microphone on Core.
      │  HTTP
      ▼
   ┌──────────────────────────────────────────────────────────────────┐
-  │  KALI          access point · core · brain                       │
+  │  ONE MACHINE   core · brain · voice · ears                       │
   │                                                                  │
   │    MICROPHONE ──→ speech to text ──→ is it a fixed command?      │
   │    (on Kali)          (whisper)         │           │            │
@@ -279,12 +279,12 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
   │                                         │           │            │
   │                                         └─────┬─────┘            │
   │                                               ▼                  │
-  │                                    JARVIS CORE ── 10.42.0.1      │
+  │                                    JARVIS CORE                   │
   │                                    voice out ──→ speakers        │
   └────────────────────────────┬─────────────────────────────────────┘
                                │  SSE, one stream per device
-     Wi-Fi AP            ┌─────┼─────┐
-     JARVIS-NET          ▼     ▼     ▼
+     the room's Wi-Fi     ┌────┼─────┐
+                          ▼    ▼     ▼
                     device 1  dev 2  dev 3      ← numbered in join order
                      (agent) (agent) (agent)
                          │     │     │
@@ -292,8 +292,24 @@ hardware does that — [REHEARSAL.md](docs/REHEARSAL.md) marks which tests need 
                 fullscreen overlay, dedicated browser profile
 ```
 
-Read it top to bottom: the phone controls Kali, and Kali controls the room. Nothing skips
+Read it top to bottom: the phone controls Core, and Core controls the room. Nothing skips
 a tier.
+
+**Everything runs on one machine, on the room's own Wi-Fi.** Core, the microphone, the
+voice, the model and the MCP server are all on it; teammates join the network they are
+already on. `scripts/start-mac.sh` is the whole thing.
+
+Earlier versions had that machine also *be* the network — a Kali laptop running the access
+point. `scripts/setup-kali.sh` still does that, and `docs/DEVIATIONS.md` D8 explains why it
+was built that way. But a machine that is also an access point has a second job it can fail
+at, and it did: the hotspot dropped mid-demo, and living on an island of its own meant no
+internet for the voice or the model. Joining the room's network removes both problems.
+
+What it costs is the one thing an access point gave for free — a guarantee that devices can
+reach each other. Many campus and venue networks isolate clients, and on one of those the
+join line simply hangs. **Open the control page on a phone before the day**; if it loads,
+joining will work. If it does not, a phone hotspot that everyone joins — this machine
+included — is the way round it.
 
 **Fixed commands are bare; questions need the name.** "Take the room", "identify two",
 "show me the architecture" work as spoken, and are matched on Core in microseconds. Anything
